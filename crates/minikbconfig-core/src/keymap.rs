@@ -17,6 +17,14 @@ pub const CHUNK_KEYS: u8 = (CHUNK_PAYLOAD_LEN / KEY_RECORD_LEN) as u8;
 /// Key slots addressable on this device model.
 pub const KEY_SLOTS: u8 = 28;
 
+/// Canonical modifier names, in bit order.
+///
+/// One list, read by both the renderer and anything that suggests names, so a
+/// completion cannot offer a modifier the grammar does not accept.
+pub const MODIFIER_NAMES: [&str; 8] = [
+    "ctrl", "shift", "alt", "gui", "rctrl", "rshift", "ralt", "rgui",
+];
+
 /// Modifiers, as encoded in `code1` for [`KeyType::Standard`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Modifiers(pub u8);
@@ -51,19 +59,10 @@ impl Modifiers {
     ///
     /// Bare names for the left-hand modifier; see [`Modifiers::parse`].
     pub fn render(self) -> String {
-        const TABLE: [(u8, &str); 8] = [
-            (0x01, "ctrl"),
-            (0x02, "shift"),
-            (0x04, "alt"),
-            (0x08, "gui"),
-            (0x10, "rctrl"),
-            (0x20, "rshift"),
-            (0x40, "ralt"),
-            (0x80, "rgui"),
-        ];
-        let parts: Vec<&str> = TABLE
+        let parts: Vec<&str> = MODIFIER_NAMES
             .iter()
-            .filter(|(bit, _)| self.0 & bit != 0)
+            .enumerate()
+            .filter(|(bit, _)| self.0 & (1u8 << bit) != 0)
             .map(|(_, name)| *name)
             .collect();
         parts.join("+")

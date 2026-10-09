@@ -17,6 +17,7 @@
 //! a library that writes to stdout stops being usable from another frontend.
 
 pub mod action;
+pub mod complete;
 pub mod config;
 pub mod error;
 
