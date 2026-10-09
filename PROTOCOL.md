@@ -316,8 +316,21 @@ empirically by writing distinct codes and observing which control emits them.
 This is the single most dangerous ambiguity in the protocol. The device's own
 config reply (`05`) reports `layer = 1` in a **1-based** field, while the
 vendor's UI calls `setCurrentLayer(0)` and never sends the layer to the device
-at all. Writing to layer 1 stores and reads back perfectly yet has no effect
-on behaviour.
+at all. The layer goes in **report byte 6**.
+
+Verified on hardware 2026-10-09:
+
+- Layers 1-5 read back as empty; only layer 0 carries a configuration.
+- Writing key 0 on layer 1 stored `a` there and read back correctly, while
+  layer 0 kept its own binding for the same slot. The layers are independent.
+- Pressing that physical control still emitted layer 0's binding, confirming
+  layer 0 is the live one and that byte 6 selects the layer being written.
+
+So the earlier note that "writing to layer 1 stores and reads back perfectly
+yet has no effect" is a statement about *behaviour*, not about the write
+failing: a non-zero layer is genuinely stored, it simply is not the layer the
+pad emits from. Read-back alone cannot tell you which layer is live — only an
+emitted keystroke can.
 
 Always confirm by observing an emitted keystroke, not by reading the table
 back. See §7.
