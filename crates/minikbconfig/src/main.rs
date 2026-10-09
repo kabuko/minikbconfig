@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use minikbconfig_core::keymap::{self, KeyTable, KeyType};
+use minikbconfig_core::light::{self, LightConfig};
 
 use action::parse_action;
 use config::{ConfigFile, Plan};
@@ -28,7 +29,9 @@ COMMANDS:
     dump                 Print the pad's current key map
     keys                 List supported key and media names
     set <INDEX> <ACTION> Bind one key slot, e.g. `set 1 key:ctrl-c`
-    led <MODE>           Set the backlight mode (0, 1 or 2)
+    led                  Show the current lighting state
+    led on|off           Turn the backlight on or off
+    led key <N> <#RRGGBB> Set one key's backlight colour
     snapshot <FILE>      Save the current configuration as JSON
     apply <FILE>         Program a configuration saved by `snapshot`
     watch [SECONDS]      Show what the pad emits as you press it
@@ -43,6 +46,13 @@ ACTIONS:
     delay:<ms>              macro delay
     url:<target>            launch a URL
 
+LED OPTIONS (for `led on`):
+    -b, --brightness <0-4>  Brightness; 0 is off
+    -m, --mode <1-6>        Effect mode. Modes outside 1-6 are discarded
+    -c, --color <#RRGGBB>   Colour, e.g. --color '#00ff88'
+        --speed <N>         Effect speed
+        --direction <0-3>   Effect direction
+
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
     -n, --dry-run           With `apply`: show the diff without writing
@@ -53,7 +63,10 @@ OPTIONS:
 EXAMPLES:
     minikbconfig info
     minikbconfig set 1 key:f13
-    minikbconfig set 16 media:mute --layer 0
+    minikbconfig led
+    minikbconfig led on --color '#ff0000'
+    minikbconfig led on --mode 2 --brightness 4 --speed 20
+    minikbconfig led off
     minikbconfig snapshot pad.json
     minikbconfig apply pad.json --dry-run
     minikbconfig watch 30
@@ -93,7 +106,10 @@ fn run() -> anyhow::Result<()> {
         "dump" => cmd_dump(layer),
         "keys" | "keys-list" => cmd_keys(),
         "set" => cmd_set(rest, layer),
-        "led" => cmd_led(rest),
+        "led" => match rest.first().map(String::as_str) {
+            Some("key") => cmd_led_key(&rest[1..]),
+            _ => cmd_led(rest),
+        },
         "snapshot" => cmd_snapshot(rest, layer),
         "apply" => cmd_apply(rest),
         "watch" => cmd_watch(rest),
@@ -283,23 +299,194 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Show or change the pad's lighting.
+///
+/// With no arguments this reports the current state. Otherwise it patches the
+/// fields named by flags and writes the whole record back, which is what the
+/// vendor's own `setLightEffectConfig` does: read, patch, write.
 fn cmd_led(args: &[String]) -> anyhow::Result<()> {
+    let pad = Pad::open()?;
+    let mut config = pad.light_config()?;
+    let before = config;
+
+    let mut brightness = None;
+    let mut mode = None;
+    let mut colour = None;
+    let mut speed = None;
+    let mut direction = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        // Each branch consumes its own arity: flags that take a value consume
+        // two, bare words like `on` consume one.
+        let (name, arity) = match arg {
+            "on" => {
+                brightness = Some(3);
+                ("on", 1)
+            }
+            "off" => {
+                brightness = Some(0);
+                config.value = 0;
+                ("off", 1)
+            }
+            "--brightness" | "-b" => ("--brightness", 2),
+            "--mode" | "-m" => ("--mode", 2),
+            "--color" | "--colour" | "-c" => ("--color", 2),
+            "--speed" => ("--speed", 2),
+            "--direction" => ("--direction", 2),
+            other => anyhow::bail!("unknown led option '{other}'"),
+        };
+        let value = |i: usize| -> anyhow::Result<String> {
+            args.get(i + 1)
+                .cloned()
+                .with_context(|| format!("{name} needs a value"))
+        };
+        if arity == 2 {
+            match name {
+                "--brightness" => brightness = Some(value(i)?.parse().context("brightness must be 0-4")?),
+                "--mode" => mode = Some(value(i)?.parse().context("mode must be a number")?),
+                "--color" => colour = Some(value(i)?),
+                "--speed" => speed = Some(value(i)?.parse().context("speed must be a number")?),
+                "--direction" => direction = Some(value(i)?.parse().context("direction must be 0-3")?),
+                _ => unreachable!(),
+            }
+        }
+        i += arity;
+    }
+
+    let changed = brightness.is_some()
+        || mode.is_some()
+        || colour.is_some()
+        || speed.is_some()
+        || direction.is_some();
+
+    if !changed {
+        print_light(&before);
+        return Ok(());
+    }
+
+    if let Some(b) = brightness {
+        if b > 4 {
+            anyhow::bail!("brightness must be 0-4 (got {b})");
+        }
+        config.brightness = b;
+        // Turning on needs a colour to show: a black one has value 0, and a
+        // valid mode, because the firmware drops the record without one.
+        if b > 0 && colour.is_none() && config.value == 0 {
+            let [h, s, v] = light::hex_to_hsv("#ffffff")?;
+            config.hue = h;
+            config.saturation = s;
+            config.value = v;
+        }
+    }
+    if let Some(m) = mode {
+        // Refuse rather than substitute: silently turning mode 9 into mode 1
+        // would write something the user did not ask for.
+        if !(light::MIN_MODE..=light::MAX_MODE).contains(&m) {
+            anyhow::bail!(
+                "mode {m} is not one the firmware accepts ({}-{}); \
+                 the device discards the whole record for any other value",
+                light::MIN_MODE,
+                light::MAX_MODE
+            );
+        }
+        config.mode = m;
+    }
+    // The record is only stored for modes 1-6, so a pad whose stored mode is 0
+    // or unknown needs one before any write will land. Only pick one when the
+    // caller did not ask for a specific mode.
+    if !config.has_valid_mode() {
+        config.mode = LightConfig::default_mode();
+    }
+    if config.mode == 0 {
+        config.cycle = 0; // the vendor clears `color` when mode is 0
+    }
+    if config.is_lit() {
+        config.cycle = 1;
+    }
+    if let Some(hex) = &colour {
+        let [h, s, v] = light::hex_to_hsv(hex)?;
+        config.hue = h;
+        config.saturation = s;
+        config.value = v;
+        config.cycle = 1;
+    }
+    if let Some(s) = speed {
+        config.speed = s;
+    }
+    if let Some(d) = direction {
+        config.direction = d;
+    }
+
+    print_light(&before);
+    if config == before {
+        println!("  no changes");
+        return Ok(());
+    }
+    println!("  ->");
+    print_light(&config);
+
+    let stored = pad.set_light_config(config)?;
+    println!(
+        "\n  stored: ok (brightness {}, value {})",
+        stored.brightness, stored.value
+    );
+    if !stored.is_lit() && config.is_lit() {
+        println!("  note: the pad reports this as dark — check the LEDs are present");
+    }
+    Ok(())
+}
+
+fn print_light(config: &LightConfig) {
+    println!(
+        "  type {}  single-colour index {}",
+        config.light_type, config.single_color_index
+    );
+    println!(
+        "  brightness {}  mode {}  speed {}  direction {}  cycle {}",
+        config.brightness, config.mode, config.speed, config.direction, config.cycle
+    );
+    println!(
+        "  hue {}  saturation {}  value {}  -> {}",
+        config.hue,
+        config.saturation,
+        config.value,
+        if config.is_lit() { "lit" } else { "dark" }
+    );
+}
+
+/// Set a single key's backlight colour.
+fn cmd_led_key(args: &[String]) -> anyhow::Result<()> {
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
-    let mode: u8 = positional
+    let index: u8 = positional
         .first()
         .copied()
-        .context("usage: minikbconfig led <0|1|2>")?
+        .context("usage: minikbconfig led key <INDEX> <#RRGGBB>")?
         .parse()
-        .context("LED mode must be 0, 1 or 2")?;
-    if mode > 2 {
-        anyhow::bail!("LED mode must be 0, 1 or 2 (got {mode})");
+        .context("key index must be a number")?;
+    let hex = positional
+        .get(1)
+        .copied()
+        .context("usage: minikbconfig led key <INDEX> <#RRGGBB>")?;
+    let rgb = parse_rgb(hex)?;
+
+    let pad = Pad::open()?;
+    pad.set_key_color(index, rgb)?;
+    println!("  key[{index:2}] colour set to {hex}");
+    Ok(())
+}
+
+fn parse_rgb(hex: &str) -> anyhow::Result<[u8; 3]> {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() != 6 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        anyhow::bail!("'{hex}' is not a #RRGGBB colour");
     }
-    let _pad = Pad::open()?;
-    anyhow::bail!(
-        "LED control is not implemented: the device's light protocol (commands 0A/0B/16) \
-         is documented in PROTOCOL.md but has not been verified against hardware. \
-         Use the vendor app for lighting until it is."
-    );
+    Ok([
+        u8::from_str_radix(&s[0..2], 16).unwrap(),
+        u8::from_str_radix(&s[2..4], 16).unwrap(),
+        u8::from_str_radix(&s[4..6], 16).unwrap(),
+    ])
 }
 
 fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {

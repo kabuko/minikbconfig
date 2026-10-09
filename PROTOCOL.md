@@ -161,58 +161,66 @@ but untested.
 
 The device reports 6 profiles but only profile 0 has been exercised.
 
-### Key read / write in detail
+### Lighting
 
-Read one chunk of the key table (56 bytes = 14 keys):
+Field layout and call shapes come from the vendor's JavaScript, which is the
+authoritative source for this protocol:
 
-```
-06 08 3A <off_lo> <off_hi> 00 <layer> 00 …
-```
-
-Response payload (offset 8) is 56 bytes of key records.
-
-Write a single key (4-byte record):
-
-```
-06 10 07 <idx_lo> <idx_hi> 00 <layer> 00 <type> <code1> <code2> <code3>
+```js
+getLightConfig()   -> sendDeviceData(6, [10]) then .slice(5, 16)
+setLightConfig(e)  -> sendDeviceData(6, [11, e.length, 0, 0, ...fields])
+setKeyColorInfo(e) -> l[1]=3, l[2..3]=3*key_index, l[7..9]=R,G,B
 ```
 
-where `idx = key_index * 4`. This command commits immediately — there is no
-separate flash-write or save step.
+Three things here are easy to get wrong, and all three cost real time:
 
-Bulk write uses `09` with a 56-byte payload and length byte `3 + 56 = 59`
-(`0x3B`). Sending a short payload with a short length byte to `09` stores the
-value but does **not** apply it; use `10` for single-key writes.
+**The record starts at report offset 5, not 8.** Like the device-config reply
+(`05`), lighting answers and is written at offset 5. Reading it from offset 8 —
+where payloads normally start — returns an all-zero record, which looks
+exactly like "this pad has no lighting".
 
-### Device config (`05`)
+```
+aa 0a 0b 00 00 01 00 00 00 00 00 00 ...   reply to 0x0A
+                  ^^ offset 5: type=1, mode=0, brightness=0, value=0
+```
 
-Response fields begin at offset 5, not 8:
+**Brightness is byte 3 of the record** (report byte 8), and a fresh pad has it
+at 0. A colour with `value == 0` — black, or unset — lights nothing however
+bright the brightness setting, so both must be raised.
 
-| Offset | Field |
+**Only modes 1-6 are stored.** Sweeping modes 0-8, every write outside 1-6 is
+acknowledged and echoed back correctly, then discarded: a following read
+reports an all-zero record. Mode 0 is not "solid colour", it means the record
+is rejected. So turning the lights on requires choosing a mode as well.
+
+| Record byte | Field |
 |---|---|
-| 5–6 | protocol version (u16 LE) |
-| 7–8 | product ID (u16 LE) |
-| 9–10 | firmware version (u16 LE) |
-| 11 | work mode |
-| 12 | link status |
-| 13 | battery percent |
-| 14 | charge state |
-| 15 | profile count |
-| 16 | current profile |
-| 17 | layer count |
-| 18 | current layer (**1-based**) |
+| 0 | type (the vendor always writes 1) |
+| 1 | unused |
+| 2 | mode, 1-6 |
+| 3 | brightness, 0-4 (0 is off) |
+| 4 | speed |
+| 5 | direction |
+| 6 | colour/cycle flag (the vendor clears it when mode is 0) |
+| 7 | single-colour index; the vendor writes 0, the device reports 255 |
+| 8-10 | hue, saturation, value, each 0-255 |
 
-Sample response from a real device:
+Colour bytes come from `#RRGGBB` converted to HSV with hue in degrees and s/v
+as percentages, each then scaled by /360 or /100 into a byte. Because value is
+`max(r,g,b)`, it is simply the brightest channel.
 
-```
-aa 05 0e 00 00 01 00 fa dc 68 00 00 01 64 00 06 00 00 01 64 00 06 …
-                │  │  │  │  │  │  │  │  └── battery = 100
-                │  │  │  │  │  │  │  └───── profile count = 6
-                │  │  │  │  │  │  └──────── current layer = 1
-                │  │  │  │  │  └─────────── layer count = 1
-                │  │  │  │  └────────────── PID 0xDCFA ✓
-                │  │  │  └───────────────── firmware 0x0068
-```
+**`16` is a query, not the write.** The vendor's `setLightEffectConfig` sends
+`[22, 0, 0, 0, 1, 0, mode]`, reads the reply, patches byte 2 of the returned
+config with the mode, and writes the whole record back with `0B`. So `16` on
+its own does nothing persistent, and its reply does not vary with the mode
+value — which is exactly what a naive probe sees.
+
+Per-key colours are written with `14`, offset **`3 * key_index`** and length
+byte **3**, because colours are stored one RGB triple per key. A bare index
+offset writes to the wrong key.
+
+Verified on hardware 2026-10-09: `minikbconfig led on --color '#00ccff'` lit
+the pad cyan at brightness 4, mode 2, and `led off` returned it to dark.
 
 ## 4. Key model
 

@@ -127,6 +127,15 @@ pub enum ProtocolError {
 
     #[error("key index {index} is out of range (max {max})")]
     KeyIndexOutOfRange { index: u8, max: u8 },
+
+    #[error("'{0}' is not a #RRGGBB colour")]
+    BadColour(String),
+
+    #[error(
+        "light mode {mode} is not one the firmware accepts ({min}-{max}); \
+         the device silently discards the whole record"
+    )]
+    InvalidLightMode { mode: u8, min: u8, max: u8 },
 }
 
 #[cfg(test)]

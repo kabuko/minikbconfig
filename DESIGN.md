@@ -222,7 +222,7 @@ minikbconfig dump                 print the device's current key map
 minikbconfig keys                 list supported types and code names
 minikbconfig set <index> <action> set one key, e.g. `minikbconfig set 1 key:ctrl-c`
 minikbconfig set-knob <part> <action>
-minikbconfig led <mode>
+minikbconfig led               show lighting state; `led on|off`, `--color`, `--mode`
 minikbconfig snapshot <file>      save the current configuration
 minikbconfig apply <file>         program a configuration
 minikbconfig watch                live decode of what the pad emits
@@ -267,6 +267,9 @@ at the seat gets access without group membership.
   payload length while reads use a fixed `58`.
 - Firmware update commands (`55`, `5A`) are mapped but **untested** — deliberately
   not exercised, as flashing is destructive and unrecoverable if interrupted.
+- The lighting commands (`0A`, `0B`, `14`, `16`) are verified working. The record
+  lives at report offset 5, brightness starts at 0, and only modes 1-6 are
+  stored — see `PROTOCOL.md` §3 for the traps.
 - The `6d7b:dcfa` device has 6 profiles (`profileCnt = 6`) and the tool can read and
   select them (`FB`), but per-profile key storage has not been exercised beyond
   profile 0.

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use minikbconfig_core::{
     keymap::{self, Command, KeyTable, CHUNK_KEYS, KEY_SLOTS},
+    light::{self, LightConfig},
     protocol::{is_reply_to, Request, REPORT_LEN, RESPONSE_PAYLOAD_OFFSET},
     response::{DeviceInfo, Response},
     Emitted, PRODUCT_ID, VENDOR_ID,
@@ -160,6 +161,67 @@ impl Pad {
         table
             .get(index)
             .ok_or_else(|| anyhow::anyhow!("device did not return a record for key {index}"))
+    }
+
+    /// Read the pad's current lighting state.
+    pub fn light_config(&self) -> anyhow::Result<LightConfig> {
+        let report = light::read_light_config();
+        let reply = self.exchange_bytes(&report, 0x0A)?;
+        Ok(LightConfig::parse(&reply)?)
+    }
+
+    /// Write the pad's lighting state and read it back to confirm.
+    pub fn set_light_config(&self, config: LightConfig) -> anyhow::Result<LightConfig> {
+        let report = light::write_light_config(config)?;
+        self.exchange_bytes(&report, 0x0B)?;
+        let stored = self.light_config()?;
+        if !config.applied(stored) {
+            let differs = config.differences(stored).join(", ");
+            anyhow::bail!(
+                "lighting did not take effect; the device differs on: {differs}\n  \
+                 wanted  {config:?}\n  \
+                 device  {stored:?}"
+            );
+        }
+        Ok(stored)
+    }
+
+    /// Set one key's colour.
+    pub fn set_key_color(&self, index: u8, rgb: [u8; 3]) -> anyhow::Result<()> {
+        let report = light::set_key_color(index, rgb)?;
+        self.exchange_bytes(&report, 0x14)?;
+        Ok(())
+    }
+
+    /// Send a pre-built report and return the reply.
+    ///
+    /// The light commands do not fit the generic [`Request`] builder: their
+    /// records start at offset 5 rather than 8.
+    fn exchange_bytes(&self, report: &[u8], command: u8) -> anyhow::Result<Vec<u8>> {
+        self.drain_stale_input();
+        self.handle.write(report)?;
+
+        let deadline = Instant::now() + REPLY_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                anyhow::bail!("no reply to command 0x{command:02x} within {REPLY_TIMEOUT:?}");
+            }
+            let Some(bytes) = self.read_report(timeout_ms(remaining))? else {
+                continue;
+            };
+            if Response::parse(&bytes)?.is_none() {
+                continue; // unsolicited notification
+            }
+            // Offset is always 0 for these commands, so the echoed offset is
+            // the same in every reply; the command byte is the only better
+            // discriminator here, and these commands *are* echoed correctly.
+            let echoed = bytes.get(1).copied().unwrap_or(0);
+            if echoed != command {
+                continue;
+            }
+            return Ok(bytes);
+        }
     }
 
     /// Read one input report, or `None` if the timeout expired.
