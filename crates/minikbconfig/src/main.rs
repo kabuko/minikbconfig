@@ -92,6 +92,7 @@ fn run() -> anyhow::Result<()> {
 
     let command = args[0].clone();
     let rest = &args[1..];
+    check_flags(rest)?;
     let layer = parse_layer_flag(rest)?;
 
     match command.as_str() {
@@ -112,6 +113,42 @@ fn run() -> anyhow::Result<()> {
             anyhow::bail!("unknown command '{other}'");
         }
     }
+}
+
+/// Every flag the CLI understands.
+///
+/// Checked up front because a mistyped flag is otherwise swallowed silently:
+/// `watch --raw15` is not `--raw 15`, and it was quietly treated as no flag at
+/// all, giving non-raw output for the wrong duration with nothing to say so.
+const FLAGS: &[&str] = &[
+    "-h",
+    "--help",
+    "-V",
+    "--version",
+    "-l",
+    "--layer",
+    "--dry-run",
+    "-n",
+    "--yes",
+    "-y",
+    "--raw",
+    "-R",
+];
+
+/// Reject any flag we do not recognise, rather than ignoring it.
+fn check_flags(args: &[String]) -> anyhow::Result<()> {
+    for arg in args {
+        if !arg.starts_with('-') || arg == "-" {
+            continue;
+        }
+        // Allow --flag=value, and a negative-looking value such as a duration
+        // is not a flag we accept either.
+        let name = arg.split('=').next().unwrap_or(arg);
+        if !FLAGS.contains(&name) {
+            anyhow::bail!("unknown option '{arg}'; try --help");
+        }
+    }
+    Ok(())
 }
 
 /// Pull `--layer N` / `-l N` out of the argument list.
@@ -699,4 +736,24 @@ fn cmd_watch(args: &[String]) -> anyhow::Result<()> {
         println!("{seen} event(s)");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+
+    #[test]
+    fn a_mistyped_flag_is_rejected_rather_than_ignored() {
+        // Found by using it: `watch --raw15` is not `--raw 15`, and it used to
+        // be swallowed, silently giving non-raw output for the wrong duration.
+        assert!(check_flags(&["--raw".into(), "15".into()]).is_ok());
+        assert!(check_flags(&["--raw15".into()]).is_err());
+        assert!(check_flags(&["--dry-run".into()]).is_ok());
+        assert!(check_flags(&["-y".into()]).is_ok());
+        assert!(check_flags(&["--layer=2".into()]).is_ok());
+        // Positional arguments are not flags, and neither is a lone dash.
+        assert!(check_flags(&["pad.json".into(), "0".into()]).is_ok());
+        assert!(check_flags(&["-".into()]).is_ok());
+        assert!(check_flags(&["--nope".into()]).is_err());
+    }
 }
