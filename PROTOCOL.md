@@ -500,6 +500,32 @@ Reported keystrokes are decoded as:
 - interface 1 (boot keyboard): byte 0 modifiers, byte 1 pad, bytes 2–7 keycodes
 - interface 0: report ID 1 = keyboard, 2 = mouse, 3/5 = consumer (u16 LE at bytes 1–2), 4 = system control
 
+### An unreleased keycode persists in the boot report
+
+The boot report carries up to six simultaneous keycodes, and the pad does not
+always clear them. Observed 2026-10-09: after a macro emitted repeated `a`
+keystrokes with no matching release, every subsequent press reported its own key
+**plus** a stray `a` — pressing key 1 gave `a` and `f13` together.
+
+The stray code is not a held key. With nothing pressed, no report arrives at
+all, so it is stale state in the report array rather than a latched modifier.
+It appears on every control, which rules out a per-key binding.
+
+Two consequences:
+
+- **Comparing reports must check for the wanted key, not for exact equality.**
+  A binding of `f13` is working when the report contains `f13`; requiring the
+  array to equal `[f13]` reports a good write as a failure. But the extra codes
+  are worth reporting separately, because a stuck key is a real fault with a
+  different fix — `minikbconfig` distinguishes "wrong action" from "right
+  action plus a stray key" for exactly this reason.
+- **An unplug clears it.** It does not survive power-cycling, and
+  `restore_factory_settings` is not needed for it.
+
+This is a good illustration of why step 3 cannot be skipped. In this case
+read-back had already confirmed the write, and only observing the emitted report
+revealed anything at all.
+
 ## 7. Provenance and caveats
 
 Reverse-engineered from `www.sdcx-tech.com/_next/static/chunks/app/page-*.js`
