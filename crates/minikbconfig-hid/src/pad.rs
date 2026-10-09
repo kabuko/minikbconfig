@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use minikbconfig_core::{
-    Emitted, PRODUCT_ID, VENDOR_ID,
+    Emitted, SUPPORTED,
     keymap::{self, CHUNK_KEYS, Command, KEY_SLOTS, KeyTable},
     light::{self, LightConfig},
     protocol::{REPORT_LEN, RESPONSE_PAYLOAD_OFFSET, Request, is_reply_to},
@@ -44,12 +44,17 @@ impl Pad {
     pub fn open() -> anyhow::Result<Pad> {
         let interfaces = device::find_config_interfaces()?;
         match interfaces.len() {
-            0 => anyhow::bail!(
-                "no supported pad found (expected USB {:04x}:{:04x}); \
-                 is it plugged in, and is the udev rule installed?",
-                VENDOR_ID,
-                PRODUCT_ID
-            ),
+            0 => {
+                let wanted: Vec<String> = SUPPORTED
+                    .iter()
+                    .map(|d| format!("{:04x}:{:04x}", d.vendor_id, d.product_id))
+                    .collect();
+                anyhow::bail!(
+                    "no supported pad found (looking for USB {}); \
+                     is it plugged in, and is the udev rule installed?",
+                    wanted.join(" or ")
+                )
+            }
             1 => Pad::open_interface(&interfaces[0]),
             n => anyhow::bail!("{n} pads found; expected 1. Disconnect the others and retry."),
         }

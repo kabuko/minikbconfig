@@ -8,7 +8,7 @@
 
 use anyhow::Context;
 
-use minikbconfig_core::{PRODUCT_ID, VENDOR_ID, VENDOR_USAGE_PAGE};
+use minikbconfig_core::{DeviceId, SUPPORTED, VENDOR_USAGE_PAGE};
 
 /// How large a report descriptor we are willing to read.
 ///
@@ -97,7 +97,11 @@ pub fn open_input_interfaces() -> anyhow::Result<Vec<InputInterface>> {
 }
 
 fn is_supported(info: &hidapi::DeviceInfo) -> bool {
-    info.vendor_id() == VENDOR_ID && info.product_id() == PRODUCT_ID
+    let id = DeviceId {
+        vendor_id: info.vendor_id(),
+        product_id: info.product_id(),
+    };
+    SUPPORTED.contains(&id)
 }
 
 /// Record an interface unless that device path is already present.

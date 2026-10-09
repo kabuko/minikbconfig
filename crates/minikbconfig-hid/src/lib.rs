@@ -15,8 +15,4 @@ pub mod pad;
 pub use device::{InputInterface, InputKind, find_config_interfaces};
 pub use pad::{Pad, Watcher, describe};
 
-/// Vendor ID for the supported device family.
-pub use minikbconfig_core::VENDOR_ID;
-
-/// Product ID for the 3-key + 1-knob SIDE-KEYBOARD.
-pub use minikbconfig_core::PRODUCT_ID;
+pub use minikbconfig_core::{DeviceId, SUPPORTED};

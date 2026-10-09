@@ -32,10 +32,35 @@ pub use light::LightConfig;
 pub use protocol::{ProtocolError, Request};
 pub use response::{DeviceInfo, Response};
 
-/// USB vendor ID for the supported device family.
-pub const VENDOR_ID: u16 = 0x6D7B;
+/// USB vendor and product IDs for a supported pad.
+///
+/// Matched as a pair: the family ships under more than one vendor ID, and
+/// `0816` has no relationship to `6D7B`, so a prefix or range test would be
+/// guesswork. Both entries present the same three interfaces in the same order
+/// — numbered reports, boot keyboard, and the vendor config interface at usage
+/// page `0xFF00` usage `0x02` — so they speak the same protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceId {
+    pub vendor_id: u16,
+    pub product_id: u16,
+}
 
-/// USB product ID for the 3-key + 1-knob SIDE-KEYBOARD.
+/// Every pad this build knows how to drive.
+pub const SUPPORTED: &[DeviceId] = &[
+    // 3 keys + 1 knob. Verified end to end on 2026-10-09.
+    DeviceId {
+        vendor_id: 0x6D7B,
+        product_id: 0xDCFA,
+    },
+    // 6 keys + rotary. Same interface layout and protocol.
+    DeviceId {
+        vendor_id: 0x0816,
+        product_id: 0x246F,
+    },
+];
+
+/// The 3-key + 1-knob SIDE-KEYBOARD, and the original target of this tool.
+pub const VENDOR_ID: u16 = 0x6D7B;
 pub const PRODUCT_ID: u16 = 0xDCFA;
 
 /// Usage page of the vendor configuration interface.
@@ -43,3 +68,27 @@ pub const VENDOR_USAGE_PAGE: u16 = 0xFF00;
 
 /// Usage ID of the vendor configuration interface.
 pub const VENDOR_USAGE: u16 = 0x02;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_supported_list_has_no_duplicates() {
+        // A duplicate would make the pad count wrong: Pad::open refuses when it
+        // sees more than one, and a repeated entry would look like two pads.
+        for (i, a) in SUPPORTED.iter().enumerate() {
+            for b in &SUPPORTED[i + 1..] {
+                assert_ne!(a, b, "duplicate entry {a:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_original_device_is_still_supported() {
+        assert!(SUPPORTED.contains(&DeviceId {
+            vendor_id: VENDOR_ID,
+            product_id: PRODUCT_ID
+        }));
+    }
+}

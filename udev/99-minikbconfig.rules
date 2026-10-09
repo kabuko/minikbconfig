@@ -1,8 +1,12 @@
-# SDCX SIDE-KEYBOARD (USB 6d7b:dcfa) vendor configuration interface.
+# SDCX SIDE-KEYBOARD family: grant access to the vendor configuration interface.
 #
-# The pad exposes three HID interfaces (numbered reports, boot keyboard, and
-# the 64-byte vendor config interface). `ATTRS` matches attributes on any
-# ancestor, so all three `hidraw` nodes are covered by this one rule.
+# Known models, which ship under two unrelated vendor IDs:
+#   6d7b:dcfa   3 keys + 1 knob
+#   0816:246f   6 keys + rotary
+#
+# Each exposes three HID interfaces (numbered reports, boot keyboard, and the
+# 64-byte vendor config interface). ATTRS matches attributes on any ancestor, so
+# all three hidraw nodes are covered by one rule per model.
 #
 # Install to /etc/udev/rules.d/99-minikbconfig.rules, then reload and replug:
 #
@@ -11,14 +15,17 @@
 #
 # Access is granted two ways on purpose:
 #
-#   GROUP="plugdev"  works everywhere, but needs membership:
-#                     sudo groupadd --system plugdev      # if it does not exist
-#                     sudo usermod -aG plugdev "$USER"
-#                     then log out and back in.
-#
 #   TAG+="uaccess"   grants the logged-in seat's user access with no group
 #                    setup, but only where /dev supports POSIX ACLs. A devtmpfs
-#                    mounted without the `acl` option cannot store them, and the
-#                    tag is then silently ignored.
+#                    mounted without the `acl` option cannot store them and the
+#                    tag is then silently ignored -- which is the case here.
+#
+#   GROUP="plugdev"  works everywhere, but needs membership:
+#                    sudo groupadd --system plugdev      # if it does not exist
+#                    sudo usermod -aG plugdev "$USER"
+#                    then log out and back in.
 
-KERNEL=="hidraw*", ATTRS{idVendor}=="6d7b", ATTRS{idProduct}=="dcfa", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+ACTION=="remove", GOTO="minikbconfig_end"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="6d7b", ATTRS{idProduct}=="dcfa", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0816", ATTRS{idProduct}=="246f", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+LABEL="minikbconfig_end"
