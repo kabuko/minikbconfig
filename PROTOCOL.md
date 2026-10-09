@@ -100,7 +100,7 @@ Also 64 bytes:
 | Offset | Field | Notes |
 |---|---|---|
 | 0 | `0xAA` | response marker |
-| 1 | command | echoed |
+| 1 | command | **not** a faithful echo — see below |
 | 2 | length / status | varies by command |
 | 3–7 | echoed request fields | offset, layer |
 | 8+ | payload | |
@@ -108,8 +108,27 @@ Also 64 bytes:
 Device-initiated asynchronous notifications begin `AA FA` (LED state changes).
 Distinguish these from command responses before parsing.
 
-Requests and responses are strictly one-for-one: write a report, read the
-next input report. There is no request ID.
+### The command byte in a reply is not the command that was sent
+
+Byte 1 must **not** be used to pair a reply with its request. A key-layout read
+sent as `08 3A <off> <layer>` is answered with `07` in that slot:
+
+```
+request:  06 08 3a 00 00 00 00 00  ...        command 0x08, offset 0
+response: aa 07 3a 00 00 00 00 00  ...        0x07, but offset echoed as 00 00
+
+request:  06 08 3a 38 00 00 00 00  ...        command 0x08, offset 56
+response: aa 07 3a 38 00 00 00 00  ...        offset echoed as 38 00
+```
+
+Verified against hardware on 2026-10-09. Matching replies on byte 1 discards
+every valid key-layout reply and shows up as a timeout.
+
+The **offset** in bytes 3–4 is echoed faithfully, so that is what identifies
+the reply to a request. `minikbconfig_core::protocol::is_reply_to` does this.
+
+Requests and responses are otherwise one-for-one: write a report, read the next
+input report. There is no request ID.
 
 ## 3. Commands
 
@@ -232,7 +251,7 @@ Modifier bits in `code1`:
 | `0x40` | Right Alt |
 | `0x80` | Right GUI / Win |
 
-Example — Ctrl+C: `20 04 03 00`.
+Example — Ctrl+C: `20 01 03 00`.
 
 ### Type 0x30 — Media / consumer
 

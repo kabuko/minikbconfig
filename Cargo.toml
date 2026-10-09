@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/minikbconfig-core", "crates/minikbconfig"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+license = "MIT"
+repository = "https://github.com/yourname/minikbconfig"
+
+[workspace.dependencies]
+minikbconfig-core = { path = "crates/minikbconfig-core", version = "0.1.0" }
+anyhow = "1"
+thiserror = "2"

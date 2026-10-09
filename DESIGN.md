@@ -232,12 +232,15 @@ minikbconfig tui                  interactive editor
 `minikbconfig watch` is the same trick as §7 step 3 and is the reason the tool can
 promise verifiable writes rather than "sent successfully".
 
-Permissions, Linux:
+Permissions, Linux — install `udev/99-minikbconfig.rules`:
 
 ```
-# /etc/udev/rules.d/99-minikbconfig.rules
-KERNEL=="hidraw*", ATTRS{idVendor}=="6d7b", ATTRS{idProduct}=="dcfa", MODE="0660", TAG+="uaccess"
+sudo cp udev/99-minikbconfig.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
+
+Then replug the pad. The rule uses `TAG+="uaccess"`, so whoever is logged in
+at the seat gets access without group membership.
 
 ## 9. Provenance and caveats
 

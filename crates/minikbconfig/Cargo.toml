@@ -1,0 +1,22 @@
+[package]
+name = "minikbconfig"
+description = "Command-line configurator for SDCX SIDE-KEYBOARD macro pads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "minikbconfig"
+path = "src/main.rs"
+
+[dependencies]
+minikbconfig-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde_json = "1"
+hidapi = "2.6"
+
+[dev-dependencies]
+serde_json = "1"
