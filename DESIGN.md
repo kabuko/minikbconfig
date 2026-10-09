@@ -262,12 +262,26 @@ minikbconfig info                 enumerate pads, show interface + descriptor + 
 minikbconfig dump                 print the device's current key map
 minikbconfig keys                 list supported types and code names
 minikbconfig set <index> <action> set one key, e.g. `minikbconfig set 1 key:ctrl-c`
-minikbconfig set-knob <part> <action>
-minikbconfig led               show lighting state; `led on|off`, `--color`, `--mode`
+minikbconfig led                  show lighting state; `led on|off`, `led key <n> <#rrggbb>`
 minikbconfig snapshot <file>      save the current configuration
 minikbconfig apply <file>         program a configuration
-minikbconfig watch                live decode of what the pad emits
-minikbconfig tui                  interactive editor
+minikbconfig profile [n]          show or switch the active profile
+minikbconfig watch [seconds]      live decode of what the pad emits
+minikbconfig completions <shell>  print a completion script for bash, zsh or fish
+```
+
+The interactive editor is a separate binary, `minikbconfig-tui`, not a
+subcommand.
+
+Shell completion is generated rather than hand-written, from the same tables
+the parser reads (`minikbconfig-config::complete`). A suggestion that does not
+parse is worse than no suggestion, and a hand-maintained copy of the key names
+would drift from the grammar within one release. Install by appending:
+
+```
+minikbconfig completions bash >> ~/.bashrc
+minikbconfig completions zsh  > "${fpath[1]}/_minikbconfig"
+minikbconfig completions fish > ~/.config/fish/completions/minikbconfig.fish
 ```
 
 `snapshot` and `apply` share one JSON format, so a file always round-trips.

@@ -70,6 +70,30 @@ pub fn full_words() -> Vec<String> {
     out
 }
 
+/// Every word a shell should offer: [`full_words`] plus each modifier paired
+/// with every key.
+///
+/// The expansion exists for one reason. Offering a bare `key:ctrl-` creates a
+/// dead end: the user completes it and then TAB finds nothing, because no word
+/// begins with `key:ctrl-`. Pairing the modifiers with the key names removes the
+/// dead end for every shell at once, with no shell-specific logic — ordinary
+/// prefix filtering does the work.
+///
+/// Only single modifiers are expanded. `key:ctrl+shift-a` parses, but `describe`
+/// renders multiple modifiers joined with `+`, so the word would not survive a
+/// round trip. One modifier renders with `-` and does.
+pub fn words_with_modifiers() -> Vec<String> {
+    let mut out = full_words();
+    out.extend(
+        MODIFIER_NAMES
+            .iter()
+            .flat_map(|m| KeyCode::all().map(move |c| format!("key:{m}-{}", c.name()))),
+    );
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Tokens matching a partial word, for a consumer that completes the current
 /// token — after `key:` you are choosing a key name, not a whole action.
 ///
@@ -185,6 +209,31 @@ mod tests {
         // Atoms, so a whole word is not a token match.
         assert!(complete("key:f13").is_empty());
         assert!(full_words().contains(&"key:f13".to_string()));
+    }
+
+    #[test]
+    fn a_completed_modifier_prefix_leads_somewhere() {
+        // The dead end this exists to prevent.
+        for modifier in MODIFIER_NAMES {
+            let prefix = format!("key:{modifier}-");
+            assert!(
+                words_with_modifiers()
+                    .iter()
+                    .any(|w| w.starts_with(&prefix)),
+                "completing {prefix:?} would offer nothing afterwards"
+            );
+        }
+    }
+
+    #[test]
+    fn every_expanded_word_renders_back_exactly() {
+        for word in words_with_modifiers() {
+            if word.ends_with(':') || word.ends_with('-') {
+                continue; // a prefix, nothing to round-trip
+            }
+            let parsed = parse_action(&word).expect(&word);
+            assert_eq!(describe(parsed), word);
+        }
     }
 
     #[test]

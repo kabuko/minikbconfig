@@ -10,6 +10,8 @@ use minikbconfig_core::keymap::{self, KeyTable, KeyType};
 use minikbconfig_core::light::{self, LightConfig};
 use minikbconfig_hid::pad::{self, Pad};
 
+mod shell;
+
 use minikbconfig_config::{ConfigFile, Plan, describe, parse_action};
 
 const USAGE: &str = "\
@@ -31,6 +33,7 @@ COMMANDS:
     profile [N]          Show or switch the active profile
     watch [SECONDS]      Show what the pad emits as you press it
                          (--raw shows every report, with hex and interface)
+    completions <SHELL>  Print a completion script for bash, zsh or fish
 
 ACTIONS:
     none                    clear the slot
@@ -57,6 +60,7 @@ OPTIONS:
 
 EXAMPLES:
     minikbconfig info
+    minikbconfig completions bash >> ~/.bashrc
     minikbconfig set 1 key:f13
     minikbconfig led
     minikbconfig led on --color '#ff0000'
@@ -110,6 +114,7 @@ fn run() -> anyhow::Result<()> {
         "apply" => cmd_apply(rest),
         "profile" => cmd_profile(rest),
         "watch" => cmd_watch(rest),
+        "completions" => cmd_completions(rest),
         other => {
             eprint!("{USAGE}");
             anyhow::bail!("unknown command '{other}'");
@@ -322,6 +327,18 @@ fn verify_by_press(index: u8, action: KeyType) -> anyhow::Result<()> {
             None => continue,
         }
     }
+}
+
+fn cmd_completions(rest: &[String]) -> anyhow::Result<()> {
+    let shell = rest.first().map(String::as_str).unwrap_or("");
+    let Some(script) = shell::script_for(shell) else {
+        anyhow::bail!(
+            "unknown shell '{shell}'; expected one of {}",
+            shell::SHELLS.join(", ")
+        );
+    };
+    print!("{script}");
+    Ok(())
 }
 
 fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
