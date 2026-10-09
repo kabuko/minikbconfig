@@ -48,6 +48,8 @@ LED OPTIONS (for `led on`):
 
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
+    -V, --verify            With `set`: wait for the keypress and check the
+                            pad emits the new action
     -n, --dry-run           With `apply`: show the diff without writing
     -y, --yes               With `apply`: skip the confirmation prompt
     -h, --help              Show this help
@@ -266,7 +268,64 @@ fn cmd_keys() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Wait for the user to press a control and check the pad emits what was written.
+///
+/// The read-back above only proves the device stored the record. This is the
+/// step that proves it changed behaviour, and it is the one the CLI used to
+/// leave entirely to the user -- while telling them to do it.
+fn verify_by_press(index: u8, action: KeyType) -> anyhow::Result<()> {
+    use minikbconfig_core::emitted::Match;
+    use minikbconfig_hid::pad::Watcher;
+
+    if !minikbconfig_core::emitted::Emitted::is_observable_for(action) {
+        println!(
+            "\n  Nothing observable can confirm {}; lighting and macro bindings \
+             emit nothing comparable.",
+            describe(action)
+        );
+        return Ok(());
+    }
+
+    println!("\n  Press the control (10s)…");
+    let watcher = Watcher::open().context("could not open the input interfaces")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("nothing pressed; the write is stored but unconfirmed");
+        }
+        match watcher.next_press(remaining.min(std::time::Duration::from_millis(200)))? {
+            Some(event) => {
+                println!("  emitted {}", event.describe());
+                return match event.compare(action) {
+                    Match::Exact => {
+                        println!("  confirmed: the pad emits {}", describe(action));
+                        Ok(())
+                    }
+                    Match::ExtraKeys(extra) => {
+                        let names: Vec<String> = extra
+                            .iter()
+                            .map(|c| minikbconfig_core::keymap::KeyCode(*c).name())
+                            .collect();
+                        println!(
+                            "  warning: confirmed, but the pad also emitted {} -- \
+                             that looks like a key it never released; unplug it to clear",
+                            names.join("+")
+                        );
+                        Ok(())
+                    }
+                    Match::Mismatch => {
+                        anyhow::bail!("key[{index}] was stored but the pad emitted something else")
+                    }
+                };
+            }
+            None => continue,
+        }
+    }
+}
+
 fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
+    let verify = args.iter().any(|a| a == "--verify" || a == "-V");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
     let index: u8 = positional
         .first()
@@ -294,11 +353,16 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
     pad.write_key(index, action, layer)
         .with_context(|| format!("could not program key {index}"))?;
 
-    // Confirm the device stored it, and tell the user how to verify behaviour.
+    // Confirm the device stored it. Necessary, and not sufficient: several
+    // wrong encodings read back perfectly while emitting nothing.
     let stored = pad.read_key(index, layer)?;
     if stored == action {
         println!("    stored: ok");
-        println!("\n  Press that control to confirm it emits the new action.");
+        if verify {
+            verify_by_press(index, action)?;
+        } else {
+            println!("\n  Pass --verify to have this wait for the keypress and check it.");
+        }
     } else {
         println!(
             "    stored: MISMATCH — device returned {}",
