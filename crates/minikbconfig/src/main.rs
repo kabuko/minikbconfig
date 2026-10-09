@@ -3,15 +3,18 @@
 //! A browser-free replacement for the vendor's WebHID app.
 
 mod action;
+mod config;
 mod device;
 mod pad;
 
+use std::io::IsTerminal;
 use std::time::Duration;
 
 use anyhow::Context;
 use minikbconfig_core::keymap::{self, KeyTable, KeyType};
 
 use action::parse_action;
+use config::{ConfigFile, Plan};
 use pad::Pad;
 
 const USAGE: &str = "\
@@ -27,8 +30,8 @@ COMMANDS:
     set <INDEX> <ACTION> Bind one key slot, e.g. `set 1 key:ctrl-c`
     led <MODE>           Set the backlight mode (0, 1 or 2)
     snapshot <FILE>      Save the current configuration as JSON
+    apply <FILE>         Program a configuration saved by `snapshot`
     watch [SECONDS]      Show what the pad emits as you press it
-    keys-list            (alias for `keys`)
 
 ACTIONS:
     none                    clear the slot
@@ -38,9 +41,12 @@ ACTIONS:
     mouse:<buttons>         e.g. mouse:left, mouse:left+middle
     move:<dx>,<dy>          relative cursor motion
     delay:<ms>              macro delay
+    url:<target>            launch a URL
 
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
+    -n, --dry-run           With `apply`: show the diff without writing
+    -y, --yes               With `apply`: skip the confirmation prompt
     -h, --help              Show this help
     -V, --version           Show version
 
@@ -48,7 +54,13 @@ EXAMPLES:
     minikbconfig info
     minikbconfig set 1 key:f13
     minikbconfig set 16 media:mute --layer 0
+    minikbconfig snapshot pad.json
+    minikbconfig apply pad.json --dry-run
     minikbconfig watch 30
+
+A configuration file is declarative: applying one makes the pad match it
+exactly, so slots the file does not mention are cleared. Run with --dry-run
+first to see the whole diff; nothing is written until you confirm.
 ";
 
 fn main() -> std::process::ExitCode {
@@ -83,6 +95,7 @@ fn run() -> anyhow::Result<()> {
         "set" => cmd_set(rest, layer),
         "led" => cmd_led(rest),
         "snapshot" => cmd_snapshot(rest, layer),
+        "apply" => cmd_apply(rest),
         "watch" => cmd_watch(rest),
         other => {
             eprint!("{USAGE}");
@@ -299,45 +312,108 @@ fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     let table = pad.read_keys(layer)?;
 
-    let mut entries = Vec::new();
-    for index in 0..keymap::KEY_SLOTS {
-        let Some(action) = table.get(index) else {
-            continue;
-        };
-        if action == KeyType::Unassigned {
-            continue;
-        }
-        entries.push(serde_json::json!({
-            "index": index,
-            "action": describe_action(action),
-            "raw": KeyTable::record(index, action),
-        }));
-    }
-    // Keep slots this build cannot decode, so a snapshot is not quietly lossy.
-    for (index, ty) in &table.unrecognised {
-        entries.push(serde_json::json!({
-            "index": index,
-            "action": serde_json::Value::Null,
-            "unrecognised_type": format!("0x{ty:02x}"),
-        }));
-    }
-    entries.sort_by_key(|e| e["index"].as_u64().unwrap_or_default());
-
-    let document = serde_json::json!({
-        "device": {
-            "vendor_id": pad.vendor_id(),
-            "product_id": pad.product_id(),
-            "name": pad.product_name(),
-        },
-        "layer": layer,
-        "keys": entries,
+    let mut file = ConfigFile::from_table(&table, layer);
+    file.device = Some(config::Device {
+        vendor_id: pad.vendor_id(),
+        product_id: pad.product_id(),
+        name: pad.product_name().to_string(),
     });
 
-    let text = serde_json::to_string_pretty(&document)?;
-    std::fs::write(path, format!("{text}\n"))
+    std::fs::write(path, file.to_json()?)
         .with_context(|| format!("could not write {path}"))?;
-    println!("wrote {path} ({} keys on layer {layer})", entries.len());
+    println!("wrote {path} ({} keys on layer {layer})", file.keys.len());
     Ok(())
+}
+
+/// Compare a file against the pad, show the difference, then apply it.
+fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
+    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    let path = positional
+        .first()
+        .copied()
+        .context("usage: minikbconfig apply <FILE> [--dry-run] [--yes]")?;
+    let dry_run = args.iter().any(|a| a == "--dry-run" || a == "-n");
+    let assume_yes = args.iter().any(|a| a == "--yes" || a == "-y");
+
+    let file = ConfigFile::load(std::path::Path::new(path))?;
+    let pad = Pad::open()?;
+
+    if let Some(device) = &file.device {
+        if device.product_id != pad.product_id() || device.vendor_id != pad.vendor_id() {
+            println!(
+                "  warning: {} was captured from {:04x}:{:04x}, this pad is {:04x}:{:04x}",
+                path, device.vendor_id, device.product_id, pad.vendor_id(), pad.product_id()
+            );
+        }
+    }
+
+    // The file's layer wins over --layer: applying a file to a different layer
+    // than the one it describes would be surprising.
+    let layer = file.layer;
+    let current = pad.read_keys(layer)?;
+    let plan = Plan::between(&file, &current)?;
+
+    println!("  applying {path} to layer {layer}:");
+    if plan.is_empty() {
+        println!("    no changes");
+        return Ok(());
+    }
+
+    // Every change is shown before any is written, including the slots the file
+    // omits: a config file is declarative, so those are cleared too.
+    for change in &plan.changes {
+        println!(
+            "    key[{:2}]  {} -> {}",
+            change.index,
+            describe_action(change.before),
+            describe_action(change.after)
+        );
+    }
+
+    if dry_run {
+        println!("\n  {} change(s); not applied (--dry-run)", plan.changes.len());
+        return Ok(());
+    }
+    if !assume_yes && !confirm(&format!("apply {} change(s)?", plan.changes.len()))? {
+        println!("  aborted; nothing was written");
+        return Ok(());
+    }
+
+    // Single-key writes only. The bulk write command stores a short payload
+    // without applying it, which is the trap recorded in PROTOCOL.md §3.
+    let mut applied = 0usize;
+    for change in &plan.changes {
+        pad.write_key(change.index, change.after, layer)
+            .with_context(|| format!("could not program key {}", change.index))?;
+
+        // Read back: proves the device stored what we asked for.
+        let stored = pad.read_key(change.index, layer)?;
+        if stored != change.after {
+            anyhow::bail!(
+                "key[{}] did not take effect: wanted {}, device returned {}",
+                change.index,
+                describe_action(change.after),
+                describe_action(stored)
+            );
+        }
+        applied += 1;
+    }
+
+    println!("\n  applied and verified {applied} change(s)");
+    Ok(())
+}
+
+/// Ask for confirmation, refusing to proceed when stdin is not a terminal.
+fn confirm(question: &str) -> anyhow::Result<bool> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        anyhow::bail!("refusing to apply without confirmation; pass --yes to proceed");
+    }
+    print!("  {question} [y/N] ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut answer = String::new();
+    std::io::BufRead::read_line(&mut stdin.lock(), &mut answer)?;
+    Ok(matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 
 fn cmd_watch(args: &[String]) -> anyhow::Result<()> {

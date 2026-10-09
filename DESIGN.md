@@ -229,6 +229,18 @@ minikbconfig watch                live decode of what the pad emits
 minikbconfig tui                  interactive editor
 ```
 
+`snapshot` and `apply` share one JSON format, so a file always round-trips.
+Each entry keeps the device's own 4-byte `raw` record alongside the human
+readable action, which makes the format lossless: a slot this build cannot
+decode is still restored exactly rather than silently dropped.
+
+`apply` is declarative — the pad ends up matching the file exactly, so slots
+the file does not mention are cleared. Every change, including those clears,
+is printed before anything is written; `--dry-run` shows the diff and stops,
+and without `--yes` the command refuses to run when stdin is not a terminal.
+Writes go through command `10` one slot at a time, never the bulk write (§3),
+and each is read back before the next begins.
+
 `minikbconfig watch` is the same trick as §7 step 3 and is the reason the tool can
 promise verifiable writes rather than "sent successfully".
 
