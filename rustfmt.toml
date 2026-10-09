@@ -1,0 +1,7 @@
+# Pin the formatting settings the project is formatted with, so `cargo fmt`
+# gives the same result regardless of toolchain defaults.
+#
+# The codebase was hand-formatted at first and drifted: by the time it was
+# checked it had accumulated 77 hunks, because nothing enforced it. Run
+# `cargo fmt` before committing.
+edition = "2021"
