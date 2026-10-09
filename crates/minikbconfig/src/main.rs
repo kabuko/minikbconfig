@@ -41,9 +41,7 @@ ACTIONS:
     key:<name>              keystroke, e.g. key:a, key:f13, key:0x6d
     key:<mods>-<name>       with modifiers, e.g. key:ctrl-c, key:ctrl-shift-t
     media:<name>            e.g. media:volume-up, media:mute, media:0xea
-    mouse:<buttons>         e.g. mouse:left, mouse:left+middle
     move:<dx>,<dy>          relative cursor motion
-    delay:<ms>              macro delay
     url:<target>            launch a URL
 
 LED OPTIONS (for `led on`):
@@ -210,14 +208,9 @@ fn describe_action(action: KeyType) -> String {
         KeyType::Media { usage } => {
             format!("media:{}", keymap::consumer::name(usage))
         }
-        KeyType::MouseButton { buttons } => {
-            format!("mouse:{}", keymap::mouse::name(buttons))
-        }
+        KeyType::Macro { index } => format!("macro:{index}"),
+        KeyType::Wheel { up } => format!("wheel:{}", if up { "up" } else { "down" }),
         KeyType::MouseMove(motion) => format!("move:{},{}", motion.dx, motion.dy),
-        KeyType::Duration(d) => format!(
-            "delay:{}",
-            d.to_millis().map(|m| m.to_string()).unwrap_or_else(|| "custom".into())
-        ),
         KeyType::OpenWebsite => "url:...".to_string(),
         KeyType::CustomCombination => "custom:...".to_string(),
     }

@@ -2,7 +2,7 @@
 //!
 //! Mirrors the accepted spellings so existing configs and habits carry over.
 
-use minikbconfig_core::keymap::{consumer, mouse, Duration, KeyCode, KeyType, Modifiers};
+use minikbconfig_core::keymap::{consumer, KeyCode, KeyType, Modifiers};
 
 /// Errors from parsing an action string.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -15,11 +15,18 @@ pub enum ParseError {
     BadKey { name: String },
     #[error("could not parse media key '{name}'; try 'volume-up', 'mute', 'play/pause' or '0xe9'")]
     BadMedia { name: String },
-    #[error("could not parse mouse action '{name}'; try 'left', 'middle', 'wheel-up' or 'left+middle'")]
+    #[error(
+        "'{name}' is not a key type this device has. There is no mouse-button \
+         binding: type 0x60 is a macro index and type 0x70 is the mouse wheel"
+    )]
     BadMouse { name: String },
     #[error("could not parse mouse movement '{spec}'; expected 'move:<dx>,<dy>' with signed integers")]
     BadMove { spec: String },
-    #[error("unrecognised duration '{name}'; try 0, 120, 300, 600, 1800 or a custom 'delay:<ms>'")]
+    #[error(
+        "'{name}' is not a key type this device has. Type 0x70 is the mouse wheel \
+         (up or down), not a delay; macros are referenced by index and need macro \
+         data that is not implemented"
+    )]
     BadDuration { name: String },
 }
 
@@ -34,10 +41,7 @@ pub enum ParseError {
 /// key:0x6d                   keystroke by raw HID code
 /// media:volume-up            consumer usage
 /// media:0xea                  consumer usage by number
-/// mouse:left                 button click, combos with '+'
-/// mouse:wheel-up             wheel (supported by the device; see caveat below)
 /// move:10,-5                  relative cursor motion
-/// delay:250                   macro delay in milliseconds
 /// url:<target>                launch a URL
 /// ```
 pub fn parse_action(input: &str) -> Result<KeyType, ParseError> {
@@ -58,9 +62,9 @@ pub fn parse_action(input: &str) -> Result<KeyType, ParseError> {
         "media" | "consumer" => consumer::parse(rest)
             .map(KeyType::media)
             .ok_or_else(|| ParseError::BadMedia { name: rest.to_string() }),
-        "mouse" => parse_mouse(rest),
+        "mouse" => Err(ParseError::BadMouse { name: rest.to_string() }),
         "move" => parse_move(rest),
-        "delay" => parse_duration(rest),
+        "delay" => Err(ParseError::BadDuration { name: rest.to_string() }),
         "url" | "website" => Ok(KeyType::OpenWebsite),
         other => Err(ParseError::UnknownKind { kind: other.to_string() }),
     }
@@ -112,45 +116,12 @@ fn split_modifiers(input: &str) -> (Modifiers, &str) {
     (modifiers, rest)
 }
 
-fn parse_mouse(rest: &str) -> Result<KeyType, ParseError> {
-    let lower = rest.to_ascii_lowercase();
-    // Wheel is encoded as a signed delta in the device's type-3 payload, which
-    // this build does not model; buttons are.
-    if lower.contains("wheel") || lower.contains("scroll") {
-        return Err(ParseError::BadMouse { name: rest.to_string() });
-    }
-    let buttons = mouse::parse(rest).ok_or_else(|| ParseError::BadMouse { name: rest.to_string() })?;
-    if buttons == 0 {
-        return Err(ParseError::BadMouse { name: rest.to_string() });
-    }
-    Ok(KeyType::MouseButton { buttons })
-}
-
 fn parse_move(rest: &str) -> Result<KeyType, ParseError> {
     let bad = || ParseError::BadMove { spec: rest.to_string() };
     let (dx, dy) = rest.split_once(',').ok_or_else(bad)?;
     let dx: i16 = dx.trim().parse().map_err(|_| bad())?;
     let dy: i16 = dy.trim().parse().map_err(|_| bad())?;
     Ok(KeyType::MouseMove(minikbconfig_core::keymap::MouseMove { dx, dy }))
-}
-
-fn parse_duration(rest: &str) -> Result<KeyType, ParseError> {
-    let bad = || ParseError::BadDuration { name: rest.to_string() };
-    let millis: u16 = rest.trim().parse().map_err(|_| bad())?;
-    for index in 0..=4u8 {
-        if Duration(index).to_millis() == Some(millis) {
-            return Ok(KeyType::Duration(Duration(index)));
-        }
-    }
-    // Not one of the device's presets; the closest larger preset is the best
-    // available approximation, since the type-70 payload is only one byte.
-    let nearest = (0..=4u8)
-        .filter(|i| Duration(*i).to_millis().unwrap_or(0) >= millis)
-        .min_by_key(|i| Duration(*i).to_millis().unwrap_or(0));
-    match nearest {
-        Some(index) => Ok(KeyType::Duration(Duration(index))),
-        None => Err(ParseError::BadDuration { name: rest.to_string() }),
-    }
 }
 
 #[cfg(test)]
@@ -235,25 +206,21 @@ mod tests {
     }
 
     #[test]
-    fn mouse_actions() {
-        assert_eq!(
-            parse_action("mouse:left").unwrap(),
-            KeyType::MouseButton { buttons: mouse::LEFT }
-        );
-        assert_eq!(
-            parse_action("mouse:left+middle").unwrap(),
-            KeyType::MouseButton { buttons: 0x05 }
-        );
+    fn mouse_buttons_are_refused_because_the_device_has_none() {
+        // Type 0x60 is a macro index and 0x70 is the wheel; there is no
+        // mouse-button key binding, so this must fail loudly rather than
+        // silently writing a macro reference.
+        assert!(matches!(parse_action("mouse:left"), Err(ParseError::BadMouse { .. })));
+        assert!(matches!(parse_action("mouse:left+middle"), Err(ParseError::BadMouse { .. })));
+        let err = format!("{:#}", parse_action("mouse:left").unwrap_err());
+        assert!(err.contains("macro"), "explains what 0x60 really is: {err}");
     }
 
     #[test]
-    fn wheel_is_rejected_with_a_clear_error_rather_than_silently_dropped() {
-        // The device models wheel through type 3, which this build does not
-        // encode; saying so beats writing a button click instead.
-        assert_eq!(
-            parse_action("mouse:wheel-up"),
-            Err(ParseError::BadMouse { name: "wheel-up".into() })
-        );
+    fn delays_are_refused_because_type_seventy_is_the_wheel() {
+        assert!(matches!(parse_action("delay:250"), Err(ParseError::BadDuration { .. })));
+        let err = format!("{:#}", parse_action("delay:250").unwrap_err());
+        assert!(err.contains("wheel"), "explains what 0x70 really is: {err}");
     }
 
     #[test]
@@ -271,13 +238,6 @@ mod tests {
         assert_eq!(KeyType::from_record(record).unwrap(), action);
     }
 
-    #[test]
-    fn durations_map_to_device_presets() {
-        assert_eq!(parse_action("delay:120").unwrap(), KeyType::Duration(Duration(1)));
-        assert_eq!(parse_action("delay:1800").unwrap(), KeyType::Duration(Duration(4)));
-        // 250 is not a preset; the nearest larger one is used.
-        assert_eq!(parse_action("delay:250").unwrap(), KeyType::Duration(Duration(2)));
-    }
 
     #[test]
     fn clearing_and_urls() {

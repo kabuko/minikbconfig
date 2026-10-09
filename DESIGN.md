@@ -114,11 +114,11 @@ Asynchronous device notifications begin `AA FA` (LED events).
 | Type | Name | Meaning |
 |---|---|---|
 | `0x13` (19) | unassigned | filler |
-| `0x11` (17) | MouseMove | `code1` bits: `0x08` up / else down, `0x80` left / else right; `&7<<8\|code3` = vertical, `&0x70<<8\|code2` = horizontal |
+| `0x11` (17) | MouseMove | `code1` bits: `0x08` cursor up / else down, `0x80` left / else right; `&7<<8\|code3` = vertical, `&0x70<<8\|code2` = horizontal. The emitted report's Y sign is inverted relative to this — see `PROTOCOL.md` §4.2 |
 | `0x20` (32) | Standard keyboard | `code1` = modifier mask, `code2` = HID keycode |
 | `0x30` (48) | Media / consumer | `code1\|code2<<8\|code3<<16` = 16-bit Consumer usage |
-| `0x60` (96) | Mouse button | `code1` = button mask |
-| `0x70` (112) | Duration / delay | `code1` = duration index |
+| `0x60` (96) | Macro | `code1` = macro index (not a mouse button) |
+| `0x70` (112) | Mouse wheel | `code1` = 1 up, 255 down (not a delay) |
 | `0x80` (128) | OpenWebsite | |
 | `0xFF` (255) | CustomCombination | |
 
@@ -138,6 +138,10 @@ Key indices (28 user slots on this device), as read from the live layer:
 config reports `layer = 1` in its own 1-based field — a real trap, and the reason
 an entire round of writes appeared to be accepted (they read back fine) while doing
 nothing. See §7.
+
+Key types verified end-to-end on hardware: `0x20` Standard, `0x30` Media and
+`0x11` MouseMove. Types `0x60` and `0x70` store correctly but emit nothing, so
+`mouse:` and `delay:` actions are refused. `0x80` and `0xFF` are unverified.
 
 Original configuration of the test device, for reference:
 

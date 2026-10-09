@@ -230,14 +230,54 @@ Each key occupies **4 bytes**: `(type, code1, code2, code3)`.
 
 | Type | Name | Meaning |
 |---|---|---|
-| `0x11` (17) | MouseMove | relative cursor motion |
+| `0x11` (17) | MouseMove | relative cursor motion; see §4.2 for the axis polarity |
 | `0x13` (19) | unassigned | filler / no mapping |
 | `0x20` (32) | Standard keyboard | ordinary keystroke |
 | `0x30` (48) | Media / consumer | Consumer-page usage |
-| `0x60` (96) | Mouse button | button click |
-| `0x70` (112) | Duration / delay | macro delay |
+| `0x60` (96) | Macro | `code1` = macro index |
+| `0x70` (112) | Mouse wheel | `code1` = 1 up, 255 down |
 | `0x80` (128) | OpenWebsite | launch a URL |
 | `0xFF` (255) | CustomCombination | user-defined sequence |
+
+Types 0x60 and 0x70 were previously documented here as "mouse button" and
+"duration". Both are wrong; see §4.1.
+
+### 4.2 The MouseMove vertical axis is inverted relative to HID
+
+A stored move of `dy = +5` makes the pad emit a report of `dy = -5`, and a
+report of `dy = +5` moves the cursor **down** — the opposite of the HID
+convention, where positive Y is up. The horizontal axis is not inverted: a
+request for `dx = -10` produces a report of `dx = -10` and the cursor moves
+left.
+
+So `code1` bit `0x08` set means the cursor moves up, and `move:<dx>,<dy>` reads
+intuitively even though the emitted report's sign is flipped. Getting this
+backwards is easy to miss because the encoding round-trips perfectly either
+way — confirmed on hardware 2026-10-09 by watching the cursor rather than the
+report.
+
+### 4.1 Types 0x60 and 0x70 are macro and wheel, not mouse and delay
+
+An earlier draft of this document labelled type 96 a mouse-button mask and type
+112 a macro delay. Neither is right. The vendor's JavaScript settles it:
+
+- type 96 is listed under `"label":"Macro"` with `"code":"MACRO(n)"`, and the
+  decode path renders it as `"M" + code1` — `M0`, `M1`, … — so `code1` is a
+  **macro index**.
+- type 112 is listed as wheel up/down (`上滚轮` with `value1` 1, `下滚轮` with
+  `value1` 255), and the decode path maps 1 and 255 to those two names. So
+  `code1` = 1 is **wheel up**, 255 is **wheel down**.
+- type 31 (not modelled here) is the device's "Special" set: LED mode, LED
+  colour, profile switch, sleep, 2.4G pairing and so on.
+
+There is no mouse-button key type on this device. The `mouse` button mask exists
+only in emitted HID reports, which is a different thing.
+
+Both types **store without error and do nothing**. Writing 96 or 112 through
+command `10` reads back correctly and emits no report at all, so read-back
+cannot detect the problem — only an emitted keystroke can. Neither is usable
+until macro data (`0C`/`0D`) or the mouse path is understood, so `minikbconfig`
+refuses `mouse:` and `delay:` actions rather than writing dead bindings.
 
 ### Type 0x20 — Standard keyboard
 

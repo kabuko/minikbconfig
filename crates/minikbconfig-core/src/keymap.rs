@@ -104,10 +104,10 @@ pub enum KeyType {
     Standard { modifiers: Modifiers, code: KeyCode },
     /// A Consumer-page usage such as volume or play/pause.
     Media { usage: u16 },
-    /// A mouse button click.
-    MouseButton { buttons: u8 },
-    /// A macro delay.
-    Duration(Duration),
+    /// A macro invocation; `index` selects which recorded macro to run.
+    Macro { index: u8 },
+    /// A mouse wheel click; `up` selects the direction.
+    Wheel { up: bool },
     /// Launch a URL.
     OpenWebsite,
     /// A user-defined combination.
@@ -137,8 +137,8 @@ impl KeyType {
             KeyType::MouseMove(_) => 0x11,
             KeyType::Standard { .. } => 0x20,
             KeyType::Media { .. } => 0x30,
-            KeyType::MouseButton { .. } => 0x60,
-            KeyType::Duration(_) => 0x70,
+            KeyType::Macro { .. } => 0x60,
+            KeyType::Wheel { .. } => 0x70,
             KeyType::OpenWebsite => 0x80,
             KeyType::CustomCombination => 0xFF,
         }
@@ -157,8 +157,8 @@ impl KeyType {
             0x30 => KeyType::Media {
                 usage: u16::from_le_bytes([c1, c2]),
             },
-            0x60 => KeyType::MouseButton { buttons: c1 },
-            0x70 => KeyType::Duration(Duration(c1)),
+            0x60 => KeyType::Macro { index: c1 },
+            0x70 => KeyType::Wheel { up: c1 != 0xFF },
             0x80 => KeyType::OpenWebsite,
             0xFF => KeyType::CustomCombination,
             other => return Err(ProtocolError::UnknownKeyType { ty: other }),
@@ -180,6 +180,7 @@ impl MouseMove {
     fn from_record(c1: u8, c2: u8, c3: u8) -> Self {
         let vertical = (((c1 & 0x07) as u16) << 8) | c3 as u16;
         let horizontal = (((c1 & 0x70) as u16) << 8) | c2 as u16;
+        // Bit 0x08 set means the vertical axis moves up, i.e. positive.
         let dy = if c1 & 0x08 != 0 {
             vertical as i16
         } else {
@@ -204,24 +205,6 @@ impl MouseMove {
             c1 |= 0x80;
         }
         [0x11, c1, horizontal as u8, vertical as u8]
-    }
-}
-
-/// A macro delay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Duration(pub u8);
-
-impl Duration {
-    /// The durations the vendor's UI offers, in milliseconds.
-    pub fn to_millis(self) -> Option<u16> {
-        Some(match self.0 {
-            0 => 0,
-            1 => 120,
-            2 => 300,
-            3 => 600,
-            4 => 1800,
-            _ => return None,
-        })
     }
 }
 
@@ -325,11 +308,39 @@ pub mod consumer {
     }
 }
 
-/// Mouse button bits, as stored in `code1` for [`KeyType::MouseButton`].
+/// Mouse button bits, as they appear in an emitted HID mouse report.
+///
+/// This is a *report* field, not a key type: the device has no mouse-button
+/// key binding. Type 96 is a macro index and type 112 is the wheel.
 pub mod mouse {
     pub const LEFT: u8 = 0x01;
     pub const RIGHT: u8 = 0x02;
     pub const MIDDLE: u8 = 0x04;
+
+    /// Parse a button mask, accepting names, `left+middle`, or `0xNN`.
+    ///
+    /// The hex form matters because `name` falls back to it for bits outside
+    /// the three named buttons, and HID reports can carry others.
+    pub fn parse(s: &str) -> Option<u8> {
+        let lower = s.trim().to_ascii_lowercase();
+        if let Some(hex) = lower.strip_prefix("0x") {
+            return u8::from_str_radix(hex, 16).ok();
+        }
+        let mut bits = 0u8;
+        for part in lower.split(['+', '-']) {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            bits |= match part {
+                "left" | "l" => LEFT,
+                "right" | "r" => RIGHT,
+                "middle" | "m" => MIDDLE,
+                _ => return None,
+            };
+        }
+        Some(bits)
+    }
 
     pub fn name(buttons: u8) -> String {
         let mut parts = Vec::new();
@@ -347,23 +358,6 @@ pub mod mouse {
         } else {
             parts.join("+")
         }
-    }
-
-    pub fn parse(s: &str) -> Option<u8> {
-        let mut bits = 0u8;
-        for part in s.split(['+', '-']) {
-            let part = part.trim();
-            if part.is_empty() {
-                continue;
-            }
-            bits |= match part.to_ascii_lowercase().as_str() {
-                "left" | "l" => LEFT,
-                "right" | "r" => RIGHT,
-                "middle" | "m" => MIDDLE,
-                _ => return None,
-            };
-        }
-        Some(bits)
     }
 }
 
@@ -436,8 +430,8 @@ impl KeyTable {
             KeyType::MouseMove(m) => m.to_record(),
             KeyType::Standard { modifiers, code } => [0x20, modifiers.bits(), code.0, 0x00],
             KeyType::Media { usage } => [0x30, usage as u8, (usage >> 8) as u8, 0x00],
-            KeyType::MouseButton { buttons } => [0x60, buttons, 0x00, 0x00],
-            KeyType::Duration(d) => [0x70, d.0, 0x00, 0x00],
+            KeyType::Macro { index } => [0x60, index, 0x00, 0x00],
+            KeyType::Wheel { up } => [0x70, if up { 0x01 } else { 0xFF }, 0x00, 0x00],
             KeyType::OpenWebsite => [0x80, 0x00, 0x00, 0x00],
             KeyType::CustomCombination => [0xFF, 0x00, 0x00, 0x00],
             KeyType::Unassigned => [0x13, 0x00, 0x00, 0x00],
@@ -568,11 +562,14 @@ mod tests {
             KeyType::Standard { modifiers: Modifiers::LALT, code: KeyCode::A },
             KeyType::Standard { modifiers: Modifiers(0x01), code: KeyCode(0x03) },
             KeyType::Media { usage: consumer::VOLUME_DOWN },
-            KeyType::MouseButton { buttons: mouse::MIDDLE },
-            KeyType::Duration(Duration(2)),
+            KeyType::Macro { index: 3 },
+            KeyType::Wheel { up: true },
+            KeyType::Wheel { up: false },
             KeyType::OpenWebsite,
             KeyType::CustomCombination,
             KeyType::MouseMove(MouseMove { dx: 10, dy: -5 }),
+            KeyType::MouseMove(MouseMove { dx: 10, dy: 5 }),
+            KeyType::MouseMove(MouseMove { dx: -10, dy: -5 }),
         ];
         for action in cases {
             let record = KeyTable::record(0, action);
@@ -672,9 +669,65 @@ mod tests {
         ] {
             assert_eq!(consumer::parse(&consumer::name(usage)), Some(usage));
         }
-        for buttons in [mouse::LEFT, mouse::RIGHT, mouse::MIDDLE, 0x07] {
+        for buttons in [mouse::LEFT, mouse::RIGHT, mouse::MIDDLE, 0x07, 0x08] {
             assert_eq!(mouse::parse(&mouse::name(buttons)), Some(buttons));
-        }
+        }    }
+
+    #[test]
+    fn the_vertical_sign_bit_is_set_so_the_cursor_moves_the_intuitive_way() {
+        // Traps this in both directions. What matters is not what the emitted
+        // HID report says but which way the cursor goes: on this pad a report
+        // of dy=+5 moves the cursor *down*, the opposite of the HID convention.
+        // So `move:,5` has to set bit 0x08, which makes the pad emit dy=-5 and
+        // sends the cursor up. Inverting this to match the report sign -- which
+        // looks obviously right -- sends the cursor the wrong way.
+        let up = KeyTable::record(0, KeyType::MouseMove(MouseMove { dx: 10, dy: 5 }));
+        assert_eq!(up[1] & 0x08, 0x08, "dy positive sets bit 0x08");
+        assert_eq!(
+            KeyType::from_record(up).unwrap(),
+            KeyType::MouseMove(MouseMove { dx: 10, dy: 5 })
+        );
+
+        let down = KeyTable::record(0, KeyType::MouseMove(MouseMove { dx: 10, dy: -5 }));
+        assert_eq!(down[1] & 0x08, 0x00, "dy negative leaves it clear");
+        assert_eq!(
+            KeyType::from_record(down).unwrap(),
+            KeyType::MouseMove(MouseMove { dx: 10, dy: -5 })
+        );
+
+        // Horizontal uses the opposite convention: dx negative sets 0x80.
+        let left = KeyTable::record(0, KeyType::MouseMove(MouseMove { dx: -10, dy: 5 }));
+        assert_eq!(left[1] & 0x80, 0x80);
+        assert_eq!(
+            KeyType::from_record(left).unwrap(),
+            KeyType::MouseMove(MouseMove { dx: -10, dy: 5 })
+        );
+    }
+
+    #[test]
+    fn wheel_direction_uses_the_vendor_encoding() {
+        // The vendor stores wheel up as value1 1 and wheel down as 0xff.
+        assert_eq!(KeyTable::record(0, KeyType::Wheel { up: true })[1], 0x01);
+        assert_eq!(KeyTable::record(0, KeyType::Wheel { up: false })[1], 0xFF);
+        assert_eq!(
+            KeyType::from_record([0x70, 0x01, 0, 0]).unwrap(),
+            KeyType::Wheel { up: true }
+        );
+        assert_eq!(
+            KeyType::from_record([0x70, 0xFF, 0, 0]).unwrap(),
+            KeyType::Wheel { up: false }
+        );
+    }
+
+    #[test]
+    fn macro_type_holds_the_macro_index() {
+        // Type 96 is Macro, not a mouse button mask: the vendor's decode path
+        // renders it as "M" + index, and its key list is labelled MACRO(n).
+        assert_eq!(KeyTable::record(0, KeyType::Macro { index: 3 })[1], 3);
+        assert_eq!(
+            KeyType::from_record([0x60, 3, 0, 0]).unwrap(),
+            KeyType::Macro { index: 3 }
+        );
     }
 
     #[test]
