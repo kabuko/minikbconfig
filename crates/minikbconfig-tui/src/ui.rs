@@ -4,18 +4,30 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use crate::app::{App, Mode, Status};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    // The pane takes a fixed slice of the lower area; the slot list keeps the
+    // rest. Vertical rather than side-by-side, because the slot list is 28 rows
+    // tall and a narrow column would truncate the actions.
+    let constraints = if app.show_pane() {
+        vec![
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Percentage(35),
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ]
+    };
+    let chunks = Layout::vertical(constraints).split(area);
 
     let header = Block::default().borders(Borders::ALL).title(title(app));
     frame.render_widget(header, chunks[0]);
@@ -57,7 +69,37 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     frame.render_stateful_widget(list, chunks[1], &mut state);
 
-    frame.render_widget(footer(app), chunks[2]);
+    let footer_at = chunks.len() - 1;
+    if app.show_pane() {
+        let pane_at = footer_at - 1;
+        frame.render_widget(pane(app), chunks[pane_at]);
+    }
+    frame.render_widget(footer(app), chunks[footer_at]);
+}
+
+/// The live report pane, reusing the shared `Report` rendering.
+fn pane(app: &App) -> Paragraph<'static> {
+    let mut lines: Vec<Line> = Vec::new();
+    for report in app.reports.iter() {
+        lines.push(Line::from(report.describe()));
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no reports yet — press a key or turn the knob",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+    }
+    // Only the tail fits; the newest reports are the point.
+    let visible = lines.len().saturating_sub(20);
+    let held = app.reports.len();
+    let mut title = format!(" reports ({held} kept");
+    if app.reports.dropped() > 0 {
+        title.push_str(&format!(", {} dropped", app.reports.dropped()));
+    }
+    title.push_str(") ");
+
+    Paragraph::new(lines.into_iter().skip(visible).collect::<Vec<_>>())
+        .block(Block::default().borders(Borders::ALL).title(title))
 }
 
 fn title(app: &App) -> String {
@@ -79,6 +121,8 @@ fn footer(app: &App) -> Line<'static> {
         Span::styled("set", Style::default().add_modifier(Modifier::DIM)),
         Span::raw("  r "),
         Span::styled("refresh", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw("  v "),
+        Span::styled("reports", Style::default().add_modifier(Modifier::DIM)),
         Span::raw("  q "),
         Span::styled("quit", Style::default().add_modifier(Modifier::DIM)),
     ]);

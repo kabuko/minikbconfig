@@ -348,6 +348,47 @@ impl Watcher {
         Ok(self.next_report(timeout)?.map(|r| r.event))
     }
 
+    /// Take every report already queued, without blocking.
+    ///
+    /// For a UI that redraws on a timer: the reports wait in the hid buffer and
+    /// are collected on the next frame, so nothing needs a background thread.
+    /// That matters because `hidapi::HidDevice` is not `Send` and moving one
+    /// to a thread would mean handing the handle over anyway.
+    ///
+    /// Stops at `max` so a burst cannot stall a frame, and returns how many it
+    /// collected.
+    pub fn drain_reports(&self, out: &mut Vec<Report>, max: usize) -> anyhow::Result<usize> {
+        let mut buf = [0u8; REPORT_LEN];
+        let mut taken = 0usize;
+        while taken < max {
+            let mut any = false;
+            for interface in &self.interfaces {
+                let Ok(len) = interface.handle.read_timeout(&mut buf, 0) else {
+                    continue;
+                };
+                if len == 0 {
+                    continue;
+                }
+                any = true;
+                let event = match interface.kind {
+                    InputKind::Boot => Emitted::from_boot(&buf[..len]),
+                    InputKind::Numbered => Emitted::from_numbered(&buf[..len]),
+                };
+                out.push(Report {
+                    kind: interface.kind,
+                    bytes: buf[..len].to_vec(),
+                    event,
+                });
+                taken += 1;
+                break;
+            }
+            if !any {
+                break;
+            }
+        }
+        Ok(taken)
+    }
+
     /// Block until any report arrives, and return it unfiltered.
     ///
     /// Unlike [`Self::next_press`] this yields releases and reports the decoder
