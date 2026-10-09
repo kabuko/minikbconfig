@@ -212,7 +212,7 @@ minikbconfig-core    protocol encode/decode + key model (pure, unit-tested)
 minikbconfig-config  action grammar, rendering, snapshot format, apply plan
 minikbconfig-hid     hidapi backend + device discovery
 minikbconfig         CLI binary
-minikbconfig-tui     ratatui editor  (planned; tracked as minikbconfig-ijk)
+minikbconfig-tui     ratatui editor (slot list so far; tracked as minikbconfig-ijk)
 ```
 
 `minikbconfig-hid` holds everything that touches hardware, with no knowledge of

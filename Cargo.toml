@@ -5,6 +5,7 @@ members = [
     "crates/minikbconfig-core",
     "crates/minikbconfig-hid",
     "crates/minikbconfig",
+    "crates/minikbconfig-tui",
 ]
 
 [workspace.package]

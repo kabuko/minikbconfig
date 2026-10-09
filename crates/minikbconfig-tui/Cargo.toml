@@ -1,0 +1,19 @@
+[package]
+name = "minikbconfig-tui"
+description = "Interactive editor for SDCX SIDE-KEYBOARD macro pads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "minikbconfig-tui"
+path = "src/main.rs"
+
+[dependencies]
+minikbconfig-core.workspace = true
+minikbconfig-config.workspace = true
+minikbconfig-hid.workspace = true
+anyhow.workspace = true
+ratatui = "0.30"

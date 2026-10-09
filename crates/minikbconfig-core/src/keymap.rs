@@ -364,6 +364,29 @@ pub mod mouse {
     }
 }
 
+/// Which physical control a slot index refers to, if any.
+///
+/// Slot numbering is not contiguous: 0-2 are the keys and then nothing until 16,
+/// so a bare index means little on screen. This is device knowledge rather than
+/// presentation, which is why it lives beside the key model rather than in a
+/// frontend.
+///
+/// Indices 19-21 are a second knob, unused on this model but present in the
+/// table.
+pub fn control_name(index: u8) -> Option<&'static str> {
+    const KEYS: [&str; 3] = ["key 1", "key 2", "key 3"];
+    Some(match index {
+        0..=2 => KEYS[index as usize],
+        16 => "knob 1 press",
+        17 => "knob 1 cw",
+        18 => "knob 1 ccw",
+        19 => "knob 2 press",
+        20 => "knob 2 cw",
+        21 => "knob 2 ccw",
+        _ => return None,
+    })
+}
+
 /// What to bind to a key: the type plus the payload fields, without the slot.
 pub type KeyAction = KeyType;
 
@@ -851,5 +874,19 @@ mod tests {
                 max: KEY_SLOTS - 1
             })
         );
+    }
+
+    #[test]
+    fn control_names_cover_the_slots_that_have_controls() {
+        // Slot numbering is not contiguous, which is the whole reason this
+        // table exists: indices 3-15 are not physical controls.
+        assert_eq!(control_name(0), Some("key 1"));
+        assert_eq!(control_name(2), Some("key 3"));
+        assert_eq!(control_name(16), Some("knob 1 press"));
+        assert_eq!(control_name(18), Some("knob 1 ccw"));
+        assert_eq!(control_name(21), Some("knob 2 ccw"));
+        for index in [3u8, 15, 22, 27] {
+            assert_eq!(control_name(index), None, "slot {index} has no control");
+        }
     }
 }
