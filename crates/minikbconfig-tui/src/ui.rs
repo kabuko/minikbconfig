@@ -20,11 +20,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let header = Block::default().borders(Borders::ALL).title(title(app));
     frame.render_widget(header, chunks[0]);
 
+    // The selected row is marked in the text as well as styled, so the cursor
+    // is still visible on a terminal with no colour and to anyone who cannot
+    // distinguish the highlight.
+    let selected = app.selected();
     let items: Vec<ListItem> = app
         .rows()
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(i, row)| {
+            let marker = if i == selected { "> " } else { "  " };
             ListItem::new(Line::from(vec![
+                Span::styled(marker, Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(format!("[{:2}] ", row.index())),
                 Span::styled(
                     format!("{:<14}", row.label()),
@@ -35,7 +42,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" slots "));
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(" slots "))
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::REVERSED)
+                .add_modifier(Modifier::BOLD),
+        );
     let mut state = ListState::default();
     // Clamp: the row list can shrink under us if a refresh changes nothing,
     // and an out-of-range index would panic ratatui's stateful widget.

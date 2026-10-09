@@ -273,9 +273,7 @@ impl App {
     }
 
     fn clamp_selection(&mut self) {
-        if !self.rows.is_empty() {
-            self.selected = self.selected.min(self.rows.len() - 1);
-        }
+        self.selected = move_selection(self.selected, 0, self.rows.len());
     }
 
     /// Re-read the device, reporting failure in the footer rather than exiting,
@@ -287,13 +285,11 @@ impl App {
     }
 
     fn select_next(&mut self) {
-        if !self.rows.is_empty() {
-            self.selected = (self.selected + 1).min(self.rows.len() - 1);
-        }
+        self.selected = move_selection(self.selected, 1, self.rows.len());
     }
 
     fn select_previous(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        self.selected = move_selection(self.selected, -1, self.rows.len());
     }
 
     pub fn rows(&self) -> &[Row] {
@@ -337,6 +333,17 @@ impl Row {
     }
 }
 
+/// Move a selection index within `len` items, clamping at both ends.
+///
+/// Pure so it can be tested: selection drifting off the end of a list is easy to
+/// miss by eye and easy to pin down here.
+pub fn move_selection(current: usize, delta: isize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (current as isize + delta).clamp(0, len as isize - 1) as usize
+}
+
 /// One row per slot, named where the slot maps to a physical control.
 fn build_rows(table: &KeyTable) -> Vec<Row> {
     (0..KEY_SLOTS)
@@ -373,5 +380,23 @@ mod tests {
     fn unassigned_slots_render_as_a_dash_not_as_an_action() {
         let rows = build_rows(&KeyTable::new());
         assert_eq!(rows[0].action_text(), "—");
+    }
+
+    #[test]
+    fn selection_moves_and_clamps_at_both_ends() {
+        assert_eq!(move_selection(0, 1, 5), 1);
+        assert_eq!(move_selection(3, -1, 5), 2);
+        // Clamped, never wrapping.
+        assert_eq!(move_selection(0, -1, 5), 0);
+        assert_eq!(move_selection(4, 1, 5), 4);
+        assert_eq!(move_selection(4, 99, 5), 4);
+    }
+
+    #[test]
+    fn selection_into_an_empty_list_is_harmless() {
+        assert_eq!(move_selection(0, 1, 0), 0);
+        assert_eq!(move_selection(0, -1, 0), 0);
+        // And an index left over from a longer list is pulled back in range.
+        assert_eq!(move_selection(7, 0, 3), 2);
     }
 }
