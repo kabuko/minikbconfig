@@ -208,15 +208,24 @@ nothing, so read-back alone would have been a false positive.
 ## 8. Design
 
 ```
-minikbconfig-core   protocol encode/decode + key model (pure, unit-tested)
-minikbconfig-hid    hidapi backend + device discovery
-minikbconfig        CLI binary
-minikbconfig-tui    ratatui editor  (planned; tracked as minikbconfig-ijk)
+minikbconfig-core    protocol encode/decode + key model (pure, unit-tested)
+minikbconfig-config  action grammar, rendering, snapshot format, apply plan
+minikbconfig-hid     hidapi backend + device discovery
+minikbconfig         CLI binary
+minikbconfig-tui     ratatui editor  (planned; tracked as minikbconfig-ijk)
 ```
 
 `minikbconfig-hid` holds everything that touches hardware, with no knowledge of
-command-line arguments or terminal output, so the CLI and the TUI can drive a
-pad through the same code rather than a second implementation of it.
+command-line arguments or terminal output. `minikbconfig-config` holds how a
+*person* describes a pad — `key:ctrl-c` in and out, plus the snapshot file — so
+both frontends share one grammar and one file format instead of each having
+their own.
+
+The split keeps `serde` off `minikbconfig-core`, whose only dependency is
+`thiserror`. A crate that defines a wire protocol should not make every consumer
+of that protocol inherit a serialization stack for a file format they may not
+want. It also puts `thiserror` in the library and leaves `anyhow` to the
+binaries, which is where each belongs.
 
 Platform: **hidapi** everywhere (Linux hidraw, Windows, macOS IOHIDDevice). No
 libusb dependency at all, which removes the USBDK/Zadig problem on Windows and the

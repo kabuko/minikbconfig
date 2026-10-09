@@ -2,7 +2,7 @@
 //!
 //! Mirrors the accepted spellings so existing configs and habits carry over.
 
-use minikbconfig_core::keymap::{consumer, KeyCode, KeyType, Modifiers};
+use minikbconfig_core::keymap::{self, consumer, KeyCode, KeyType, Modifiers};
 
 /// Errors from parsing an action string.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -347,5 +347,84 @@ mod tests {
             parse_action("Media:Volume-Up").unwrap(),
             KeyType::media(0xE9)
         );
+    }
+}
+
+/// Render an action in the same grammar [`parse_action`] accepts.
+///
+/// Round-trips: `parse_action(&describe(action))` gives back the action, for
+/// every type this build can write. Types it cannot write are rendered so the
+/// gap is visible rather than looking like a binding you could set.
+pub fn describe(action: KeyType) -> String {
+    match action {
+        // The grammar's spelling for "no binding" is `none`, not "unassigned",
+        // so that is what has to come back out or the pair does not round-trip.
+        KeyType::Unassigned => "none".to_string(),
+        KeyType::Standard { modifiers, code } => {
+            let mods = modifiers.to_string();
+            let key = code.name();
+            if mods.is_empty() {
+                format!("key:{key}")
+            } else {
+                format!("key:{mods}-{key}")
+            }
+        }
+        KeyType::Media { usage } => {
+            format!("media:{}", keymap::consumer::name(usage))
+        }
+        KeyType::Macro { index } => format!("macro:{index}"),
+        KeyType::Wheel { up } => format!("wheel:{}", if up { "up" } else { "down" }),
+        KeyType::MouseMove(motion) => format!("move:{},{}", motion.dx, motion.dy),
+        // Read-only: this build cannot write one, so say so rather than
+        // rendering something that looks like a settable binding.
+        KeyType::OpenWebsite => "url:<cannot be set by this build>".to_string(),
+        KeyType::CustomCombination => "custom:<not decoded by this build>".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod describe_tests {
+    use super::*;
+    use minikbconfig_core::keymap::{consumer, MouseMove};
+
+    #[test]
+    fn describe_and_parse_round_trip_for_every_writable_type() {
+        // The claim in describe's doc comment, as a test: whatever the CLI
+        // prints for a slot must parse back to the same binding, so a TUI can
+        // display and re-apply without a second grammar.
+        let cases = [
+            KeyType::key(KeyCode::A),
+            KeyType::combo(Modifiers(0x03), KeyCode::F13),
+            KeyType::combo(Modifiers::LGUI, KeyCode::SPACE),
+            KeyType::media(consumer::VOLUME_UP),
+            KeyType::MouseMove(MouseMove { dx: 10, dy: -5 }),
+            KeyType::Unassigned,
+        ];
+        for action in cases {
+            let text = describe(action);
+            assert_eq!(parse_action(&text).unwrap(), action, "round trip {text}");
+        }
+    }
+
+    #[test]
+    fn types_this_build_cannot_write_are_rendered_as_such() {
+        // Not round-trippable, and deliberately visible: these would otherwise
+        // look like bindings a user could set, and each one is a key that reads
+        // back fine and does nothing.
+        for action in [KeyType::OpenWebsite, KeyType::CustomCombination] {
+            let text = describe(action);
+            assert!(parse_action(&text).is_err(), "{text} should not parse");
+        }
+        assert!(describe(KeyType::OpenWebsite).contains("cannot be set"));
+    }
+
+    #[test]
+    fn modifier_order_is_canonical_so_round_trips_are_stable() {
+        // parse accepts any order, describe always emits ctrl+shift, so
+        // describing a re-parsed action must be a fixed point.
+        let a = parse_action("key:shift-ctrl-f13").unwrap();
+        let b = parse_action(&describe(a)).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(describe(a), describe(b));
     }
 }

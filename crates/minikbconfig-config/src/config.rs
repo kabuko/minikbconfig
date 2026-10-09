@@ -7,9 +7,11 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Context};
 use minikbconfig_core::keymap::{self, KeyTable, KeyType, KEY_RECORD_LEN};
 use serde::{Deserialize, Serialize};
+
+use crate::action::{describe, parse_action};
+use crate::error::ConfigError;
 
 /// Which pad a file was captured from.
 ///
@@ -68,7 +70,7 @@ impl ConfigFile {
                 }
                 keys.push(Entry {
                     index,
-                    action: Some(crate::describe_action(action)),
+                    action: Some(describe(action)),
                     raw: Some(KeyTable::record(index, action)),
                     unrecognised_type: None,
                 });
@@ -96,45 +98,51 @@ impl ConfigFile {
     ///
     /// Done up front so a malformed file fails before the pad is opened or any
     /// slot is written.
-    pub fn parse(text: &str) -> anyhow::Result<ConfigFile> {
-        let file: ConfigFile =
-            serde_json::from_str(text).context("could not parse the configuration file")?;
+    pub fn parse(text: &str) -> Result<ConfigFile, ConfigError> {
+        let file: ConfigFile = serde_json::from_str(text)?;
         file.validate()?;
         Ok(file)
     }
 
-    pub fn load(path: &Path) -> anyhow::Result<ConfigFile> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("could not read {}", path.display()))?;
-        ConfigFile::parse(&text)
-            .with_context(|| format!("{} is not a valid config file", path.display()))
+    pub fn load(path: &Path) -> Result<ConfigFile, ConfigError> {
+        let shown = path.display().to_string();
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: shown.clone(),
+            source,
+        })?;
+        ConfigFile::parse(&text).map_err(|err| match err {
+            ConfigError::Malformed(source) => ConfigError::Parse {
+                path: shown.clone(),
+                source,
+            },
+            other => other,
+        })
     }
 
     /// Check every entry can produce a record, and that indices are unique.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let mut seen = [false; keymap::KEY_SLOTS as usize];
         for entry in &self.keys {
             if entry.index >= keymap::KEY_SLOTS {
-                bail!(
-                    "key index {} is out of range (max {})",
-                    entry.index,
-                    keymap::KEY_SLOTS - 1
-                );
+                return Err(ConfigError::IndexOutOfRange {
+                    index: entry.index,
+                    max: keymap::KEY_SLOTS - 1,
+                });
             }
             if seen[entry.index as usize] {
-                bail!("key index {} appears more than once", entry.index);
+                return Err(ConfigError::DuplicateIndex { index: entry.index });
             }
             seen[entry.index as usize] = true;
-            entry
-                .record()
-                .with_context(|| format!("key[{}]", entry.index))?;
+            entry.record()?;
         }
         Ok(())
     }
 
     /// Serialise, for `snapshot`.
-    pub fn to_json(&self) -> anyhow::Result<String> {
-        Ok(format!("{}\n", serde_json::to_string_pretty(self)?))
+    pub fn to_json(&self) -> Result<String, ConfigError> {
+        serde_json::to_string_pretty(self)
+            .map(|text| format!("{text}\n"))
+            .map_err(ConfigError::Serialize)
     }
 }
 
@@ -143,29 +151,37 @@ impl Entry {
     ///
     /// Prefers `raw`, so a file replays the device's own bytes exactly;
     /// otherwise re-derives the record from `action`.
-    pub fn record(&self) -> anyhow::Result<Option<[u8; KEY_RECORD_LEN]>> {
+    pub fn record(&self) -> Result<Option<[u8; KEY_RECORD_LEN]>, ConfigError> {
         if let Some(raw) = self.raw {
             return Ok(Some(raw));
         }
         match (&self.action, &self.unrecognised_type) {
-            (_, Some(ty)) => {
-                bail!("cannot restore a slot of type {ty}: this build does not decode it")
-            }
+            (_, Some(ty)) => Err(ConfigError::entry(
+                self.index,
+                format!("cannot restore a slot of type {ty}: this build does not decode it"),
+            )),
             (Some(action), None) => {
-                let parsed = crate::parse_action(action)
-                    .with_context(|| format!("could not parse action '{action}'"))?;
+                let parsed = parse_action(action).map_err(|e| ConfigError::entry(self.index, e))?;
                 Ok(Some(KeyTable::record(self.index, parsed)))
             }
-            (None, None) => bail!("entry has neither an action nor an unrecognised_type"),
+            (None, None) => Err(ConfigError::entry(
+                self.index,
+                "entry has neither an action nor an unrecognised_type",
+            )),
         }
     }
 
     /// The action this entry describes, if it has one.
-    pub fn action(&self) -> anyhow::Result<Option<KeyType>> {
+    pub fn action(&self) -> Result<Option<KeyType>, ConfigError> {
         let Some(record) = self.record()? else {
             return Ok(None);
         };
-        Ok(Some(KeyType::from_record(record)?))
+        KeyType::from_record(record)
+            .map(Some)
+            .map_err(|source| ConfigError::Undecodable {
+                index: self.index,
+                source,
+            })
     }
 }
 
@@ -189,7 +205,7 @@ impl Plan {
     /// A file is declarative: slots it does not mention are cleared, so the pad
     /// ends up matching the file exactly. Those clears appear in the diff like
     /// any other change rather than happening silently.
-    pub fn between(file: &ConfigFile, current: &KeyTable) -> anyhow::Result<Plan> {
+    pub fn between(file: &ConfigFile, current: &KeyTable) -> Result<Plan, ConfigError> {
         let mut wanted: Vec<(u8, KeyType)> = Vec::new();
         for entry in &file.keys {
             if let Some(action) = entry.action()? {
@@ -229,7 +245,7 @@ mod tests {
     fn entry(index: u8, action: KeyType) -> Entry {
         Entry {
             index,
-            action: Some(crate::describe_action(action)),
+            action: Some(describe(action)),
             raw: Some(KeyTable::record(index, action)),
             unrecognised_type: None,
         }

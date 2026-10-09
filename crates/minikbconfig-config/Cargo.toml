@@ -1,0 +1,14 @@
+[package]
+name = "minikbconfig-config"
+description = "User-facing representation of an SDCX pad configuration: action grammar and the snapshot format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+minikbconfig-core.workspace = true
+thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

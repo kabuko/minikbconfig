@@ -2,9 +2,6 @@
 //!
 //! A browser-free replacement for the vendor's WebHID app.
 
-mod action;
-mod config;
-
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -13,8 +10,7 @@ use minikbconfig_core::keymap::{self, KeyTable, KeyType};
 use minikbconfig_core::light::{self, LightConfig};
 use minikbconfig_hid::pad::{self, Pad};
 
-use action::parse_action;
-use config::{ConfigFile, Plan};
+use minikbconfig_config::{describe, parse_action, ConfigFile, Plan};
 
 const USAGE: &str = "\
 minikbconfig — configure SDCX SIDE-KEYBOARD macro pads (USB 6d7b:dcfa)
@@ -187,37 +183,12 @@ fn print_table(table: &KeyTable) {
         if action == KeyType::Unassigned {
             continue;
         }
-        println!("  key[{index:2}]  {}", describe_action(action));
+        println!("  key[{index:2}]  {}", describe(action));
     }
     // Slots this build cannot name are reported rather than hidden: dropping
     // them silently would make the dump look emptier than the pad really is.
     for (index, ty) in &table.unrecognised {
         println!("  key[{index:2}]  <unrecognised type 0x{ty:02x}>");
-    }
-}
-
-fn describe_action(action: KeyType) -> String {
-    match action {
-        KeyType::Unassigned => "unassigned".to_string(),
-        KeyType::Standard { modifiers, code } => {
-            let mods = modifiers.to_string();
-            let key = code.name();
-            if mods.is_empty() {
-                format!("key:{key}")
-            } else {
-                format!("key:{mods}-{key}")
-            }
-        }
-        KeyType::Media { usage } => {
-            format!("media:{}", keymap::consumer::name(usage))
-        }
-        KeyType::Macro { index } => format!("macro:{index}"),
-        KeyType::Wheel { up } => format!("wheel:{}", if up { "up" } else { "down" }),
-        KeyType::MouseMove(motion) => format!("move:{},{}", motion.dx, motion.dy),
-        // Read-only: this build cannot write one, so say so rather than
-        // rendering something that looks like a settable binding.
-        KeyType::OpenWebsite => "url:<cannot be set by this build>".to_string(),
-        KeyType::CustomCombination => "custom:<not decoded by this build>".to_string(),
     }
 }
 
@@ -279,8 +250,8 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
     let before = pad.read_key(index, layer)?;
 
     println!("  key[{index:2}] layer {layer}");
-    println!("    before: {}", describe_action(before));
-    println!("    after : {}", describe_action(action));
+    println!("    before: {}", describe(before));
+    println!("    after : {}", describe(action));
 
     pad.write_key(index, action, layer)
         .with_context(|| format!("could not program key {index}"))?;
@@ -293,7 +264,7 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
     } else {
         println!(
             "    stored: MISMATCH — device returned {}",
-            describe_action(stored)
+            describe(stored)
         );
         anyhow::bail!("write did not take effect; the device kept its previous value");
     }
@@ -506,7 +477,7 @@ fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {
 
     let info = pad.device_info()?;
     let mut file = ConfigFile::from_table_in_profile(&table, layer, Some(info.current_profile));
-    file.device = Some(config::Device {
+    file.device = Some(minikbconfig_config::Device {
         vendor_id: pad.vendor_id(),
         product_id: pad.product_id(),
         name: pad.product_name().to_string(),
@@ -621,8 +592,8 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
         println!(
             "    key[{:2}]  {} -> {}",
             change.index,
-            describe_action(change.before),
-            describe_action(change.after)
+            describe(change.before),
+            describe(change.after)
         );
     }
 
@@ -651,8 +622,8 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
             anyhow::bail!(
                 "key[{}] did not take effect: wanted {}, device returned {}",
                 change.index,
-                describe_action(change.after),
-                describe_action(stored)
+                describe(change.after),
+                describe(stored)
             );
         }
         applied += 1;

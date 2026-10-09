@@ -66,8 +66,18 @@ name = "minikbconfig"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "minikbconfig-config",
  "minikbconfig-core",
  "minikbconfig-hid",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "minikbconfig-config"
+version = "0.1.0"
+dependencies = [
+ "minikbconfig-core",
  "serde",
  "serde_json",
  "thiserror",
