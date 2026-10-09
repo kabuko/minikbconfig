@@ -1,21 +1,37 @@
 # minikbconfig
 
 A native, browser-free configurator for SDCX "SIDE-KEYBOARD" macro pads
-(3 keys + rotary encoder, USB `6d7b:dcfa`).
+(`6d7b:dcfa`, 3 keys + rotary; and `0816:246f`, 6 keys + rotary).
 
 Replaces the vendor's browser-based WebHID app (`www.sdcx-tech.com`) with a
 command-line/TUI tool. Named for what it does: *mini keyboard configurator*.
 
 **Status: protocol solved and verified against hardware, 2026-10-09.**
-Read *and* write both confirmed end-to-end by observing emitted keystrokes.
+Read *and* write both confirmed end-to-end by observing emitted keystrokes, on
+both supported models.
 
 ---
 
-## 1. Target device
+## 1. Target devices
 
-`6d7b:dcfa` "SDINNOVATION SIDE-KEYBOARD", 3 keys + 1 rotary encoder,
-USB 1.10, serial `125522678182`. Same physical family as the `1189:8890`
-CH55x pads, but a **different firmware and a different protocol** — see §6.
+Two models are supported. They are the same product family under unrelated
+vendor IDs, and they speak **exactly the same protocol** — identical firmware
+version, protocol version, profile count, layer count, interface layout and knob
+slots. They differ only in how many physical keys they have.
+
+| USB | Keys | Rotary | Verified |
+|---|---|---|---|
+| `6d7b:dcfa` | 3 | 1 | end to end, 2026-10-09 |
+| `0816:246f` | 6 | 1 | end to end, 2026-10-09 |
+
+`6d7b:dcfa` "SDINNOVATION SIDE-KEYBOARD", USB 1.10, serial `125522678182`.
+The `0816` ID shares no prefix or range with `6d7b`, so matching is by exact
+vendor/product pair in `SUPPORTED`, never a prefix test.
+
+Both are the same physical family as the `1189:8890` CH55x pads, but with a
+**different firmware and a different protocol** — see §6.
+
+Both present three HID interfaces:
 
 Three HID interfaces:
 
@@ -125,13 +141,21 @@ Asynchronous device notifications begin `AA FA` (LED events).
 Modifier bits (`code1` for type 32): `01` LCTRL, `02` LSHIFT, `04` LALT,
 `08` LWIN, `10` RCTRL, `20` RSHIFT, `40` RALT, `80` RWIN.
 
-Key indices (28 user slots on this device), as read from the live layer:
+Key indices. 28 user slots, and the numbering is **not contiguous**: the keys
+occupy `0..keys`, then nothing until the knobs at 16.
 
 | Index | Control |
 |---|---|
-| 0, 1, 2 | physical keys 1–3 |
+| `0..keys` | physical keys, left to right — 3 on `6d7b:dcfa`, 6 on `0816:246f` |
 | 16, 17, 18 | knob 1: press, cw, ccw |
-| 19, 20, 21 | knob 2 (unused on this unit) |
+| 19, 20, 21 | knob 2 (present in the table on both, unused on the hardware so far) |
+
+The device does **not** report its key count — `getConfig` has no such field —
+so it cannot be discovered and is carried per model in `DeviceId`. `Pad`
+exposes it, and the TUI asks the pad rather than assuming a model.
+
+Naming a key that does not exist is the same class of mistake as writing a
+binding that does nothing, so a 3-key board is never shown a "key 4".
 
 **Layers are 0-based**; layer 0 is live. The vendor's React code calls
 `setCurrentLayer(0)` but never sends the layer to the device, and the device's own
@@ -259,7 +283,15 @@ Writes go through command `10` one slot at a time, never the bulk write (§3),
 and each is read back before the next begins.
 
 `minikbconfig watch` is the same trick as §7 step 3 and is the reason the tool can
-promise verifiable writes rather than "sent successfully".
+promise verifiable writes rather than "sent successfully". `watch --raw` adds
+every report with its interface and hex, which is how the remaining protocol
+questions were answered.
+
+`snapshots/` holds one configuration file per board, committed. A snapshot is
+the only restore path that cannot be the wrong model, which matters now that two
+are supported: `tools/restore_device.py` hardcodes the 3-key board's factory
+bindings and would overwrite the 6-key board's defaults with the wrong model's.
+`apply` warns when the pad in hand is not the model the file came from.
 
 Permissions, Linux — install `udev/99-minikbconfig.rules`:
 

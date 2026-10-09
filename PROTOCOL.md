@@ -1,7 +1,8 @@
 # SDCX macro pad configuration protocol
 
-Wire protocol for SDCX "SIDE-KEYBOARD" macro pads (3 keys + rotary encoder),
-USB `6d7b:dcfa`.
+Wire protocol for SDCX "SIDE-KEYBOARD" macro pads: USB `6d7b:dcfa` (3 keys +
+rotary) and `0816:246f` (6 keys + rotary). One protocol across both; only the
+key count differs. See §1.
 
 Reverse-engineered 2026-10-09 from the vendor's own shipped JavaScript
 (`www.sdcx-tech.com`), then verified against hardware. See `DESIGN.md` for
@@ -16,14 +17,28 @@ vendor code plus empirical testing. Treat it as "observed and verified", not
 ## 1. Device identification
 
 ```
-Vendor ID   0x6D7B  "SDINNOVATION"
-Product ID  0xDCFA  "SIDE-KEYBOARD"
-bcdDevice   0x0100
-USB         1.10, full speed
+Model A      Vendor 0x6D7B  Product 0xDCFA  "SIDE-KEYBOARD"  3 keys + rotary
+Model B      Vendor 0x0816  Product 0x246F  "SIDE-KEYBOARD"  6 keys + rotary
+bcdDevice    0x0100
+USB          1.10, full speed
 ```
 
-The configuration interface is matched by **usage page + usage**, not VID/PID.
-The vendor's WebHID filter list is:
+Both models were compared directly and present the **same three interfaces in
+the same order**, with identical descriptor prefixes:
+
+```
+hidraw7  iface 0   05 01 09 06 a1 01 85 01 ...   numbered reports
+hidraw8  iface 1   05 01 09 06 a1 01 05 07 ...   boot keyboard
+hidraw9  iface 2   06 00 ff 09 02 a1 01 19 ...   vendor config, 0xFF00/0x02
+```
+
+So the protocol is one protocol across the family; only the key count differs
+(§4, Key indices). Note that `0816` shares no prefix or range with `6d7b`, so
+identification is by exact vendor/product pair — never a prefix test.
+
+The configuration interface is matched by **usage page + usage** as well as by
+ID, which is what lets interface selection work on hardware this build has never
+seen. The vendor's WebHID filter list is:
 
 ```js
 { vendorId: 0x6D7B, productId: 0xDCFA, usagePage: 0xFF00, usage: 0x02 }
@@ -337,17 +352,23 @@ horizontal = ((code1 & 0x70) << 8) | code2
 
 ### Key indices
 
-28 user slots. As read from a live 3-key/1-knob device:
+28 user slots, and the numbering is **not contiguous**: the keys occupy
+`0..keys`, then nothing until the knobs at 16.
 
 | Index | Control |
 |---|---|
-| 0, 1, 2 | physical keys 1–3 (left to right) |
+| `0..keys` | physical keys, left to right — 3 on `6d7b:dcfa`, 6 on `0816:246f` |
 | 16, 17, 18 | knob 1: press, cw, ccw |
-| 19, 20, 21 | knob 2 — present in the table, no hardware on this unit |
-| 3–15, 22–27 | unassigned on this model |
+| 19, 20, 21 | knob 2 — present in the table on both, no hardware seen yet |
+| `keys..15`, 22–27 | unassigned |
 
-The index→control mapping is a property of the device's key layout JSON, not
-of the protocol. Other models in the family will differ; discover it
+Confirmed on both models: the knob slots are identical, and only the key count
+differs. The device does not report that count — `getConfig` has no such field —
+so it is carried per model rather than discovered, and a 3-key board is never
+shown a "key 4".
+
+The index→control mapping is a property of the device's key layout, not of the
+protocol, so it is the one part that varies across the family. Discover it
 empirically by writing distinct codes and observing which control emits them.
 
 ## 5. Layers
@@ -428,6 +449,11 @@ The vendor app fetches a bundled `00006d7b_0000dcfa.json` rather than issuing a
 layout read. Everything else — config, lighting, macro, key writes — goes to the
 device. So the key-table read that this tool relies on is not something the
 vendor exercises, and its framing had to be established independently.
+
+The filename is `<vid>_<pid>.json`, so the bundle is per-model — a 6-key board
+would have its own `00000816_0000246f.json`. Only the 3-key model's has been
+seen, so whether the vendor ships a bundle for the 6-key model, and what its
+`keys` entries say about the extra three slots, is unknown.
 
 ## 5b. Macros
 
@@ -556,10 +582,31 @@ sudo python3 tools/probe_sdcx.py map 6 0    # discover index → control mapping
 
 `tools/restore_device.py` writes a known configuration and verifies it.
 
-Both require root on Linux because `/dev/hidraw*` is `0600 root:root` by
-default:
+Both require access to `/dev/hidraw*`, which is `0600 root:root` by default.
+Install `udev/99-minikbconfig.rules`, which covers both models and carries a
+group fallback as well as `uaccess`:
 
 ```
-# /etc/udev/rules.d/99-minikbconfig.rules
-KERNEL=="hidraw*", ATTRS{idVendor}=="6d7b", ATTRS{idProduct}=="dcfa", MODE="0660", TAG+="uaccess"
+sudo cp udev/99-minikbconfig.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Two ways in, on purpose. `TAG+="uaccess"` grants the logged-in seat's user
+access with no group setup, but **only where `/dev` supports POSIX ACLs** — a
+devtmpfs mounted without the `acl` option cannot store them and the tag is then
+silently ignored, which is the case on the machine this was developed on.
+`GROUP="plugdev"` works everywhere but needs `usermod -aG plugdev "$USER"` and
+a fresh login.
+
+Until then, `newgrp plugdev -c "minikbconfig dump"` works around the stale group
+list in an already-open shell.
+
+`tools/restore_device.py` hardcodes the **3-key board's** factory bindings and
+will overwrite the 6-key board's defaults with the wrong model's. Prefer a
+snapshot — see `snapshots/`, one file per board, taken from the device so it
+cannot be the wrong model:
+
+```
+minikbconfig snapshot snapshots/six_key
+minikbconfig apply snapshots/six_key --dry-run
 ```
