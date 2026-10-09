@@ -66,8 +66,8 @@ name = "minikbconfig"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "hidapi",
  "minikbconfig-core",
+ "minikbconfig-hid",
  "serde",
  "serde_json",
  "thiserror",
@@ -79,6 +79,15 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "minikbconfig-hid"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hidapi",
+ "minikbconfig-core",
 ]
 
 [[package]]

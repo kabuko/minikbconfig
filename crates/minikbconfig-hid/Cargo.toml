@@ -1,0 +1,13 @@
+[package]
+name = "minikbconfig-hid"
+description = "Device access for SDCX SIDE-KEYBOARD macro pads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+minikbconfig-core.workspace = true
+anyhow.workspace = true
+hidapi = "2.6"

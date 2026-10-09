@@ -209,10 +209,14 @@ nothing, so read-back alone would have been a false positive.
 
 ```
 minikbconfig-core   protocol encode/decode + key model (pure, unit-tested)
-minikbconfig-hid    hidapi backend + device discovery + udev rules
+minikbconfig-hid    hidapi backend + device discovery
 minikbconfig        CLI binary
-minikbconfig-tui    ratatui editor
+minikbconfig-tui    ratatui editor  (planned; tracked as minikbconfig-ijk)
 ```
+
+`minikbconfig-hid` holds everything that touches hardware, with no knowledge of
+command-line arguments or terminal output, so the CLI and the TUI can drive a
+pad through the same code rather than a second implementation of it.
 
 Platform: **hidapi** everywhere (Linux hidraw, Windows, macOS IOHIDDevice). No
 libusb dependency at all, which removes the USBDK/Zadig problem on Windows and the

@@ -4,8 +4,6 @@
 
 mod action;
 mod config;
-mod device;
-mod pad;
 
 use std::io::IsTerminal;
 use std::time::Duration;
@@ -13,10 +11,10 @@ use std::time::Duration;
 use anyhow::Context;
 use minikbconfig_core::keymap::{self, KeyTable, KeyType};
 use minikbconfig_core::light::{self, LightConfig};
+use minikbconfig_hid::pad::{self, Pad};
 
 use action::parse_action;
 use config::{ConfigFile, Plan};
-use pad::Pad;
 
 const USAGE: &str = "\
 minikbconfig — configure SDCX SIDE-KEYBOARD macro pads (USB 6d7b:dcfa)

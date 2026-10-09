@@ -13,11 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 minikbconfig-core.workspace = true
+minikbconfig-hid.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-hidapi = "2.6"
 
 [dev-dependencies]
 serde_json = "1"
