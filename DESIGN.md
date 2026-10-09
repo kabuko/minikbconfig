@@ -277,6 +277,8 @@ at the seat gets access without group membership.
 - The `6d7b:dcfa` device has 6 profiles (`profileCnt = 6`) and the tool can read and
   select them (`FB`), but per-profile key storage has not been exercised beyond
   profile 0.
+- Profiles are 0-based, hold independent key tables, and are switched with `FB`
+  (index in byte 2). Verified — see `PROTOCOL.md` §5a.
 - Layers are 0-based and layer 0 is live. Layers 1-5 read back empty; a write to
   layer 1 stores and reads back correctly without affecting layer 0, and the pad
   still emits layer 0's binding. Verified — see `PROTOCOL.md` §5.

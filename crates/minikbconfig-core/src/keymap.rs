@@ -117,7 +117,10 @@ pub enum KeyType {
 impl KeyType {
     /// A plain keystroke with no modifiers.
     pub fn key(code: KeyCode) -> KeyType {
-        KeyType::Standard { modifiers: Modifiers::NONE, code }
+        KeyType::Standard {
+            modifiers: Modifiers::NONE,
+            code,
+        }
     }
 
     /// A keystroke with modifiers.
@@ -478,11 +481,10 @@ pub fn write_key(index: u8, action: KeyType) -> Result<Request, ProtocolError> {
             max: KEY_SLOTS - 1,
         });
     }
-    Ok(Request::at(
-        Command::WRITE_KEY,
-        u16::from(index) * KEY_RECORD_LEN as u16,
+    Ok(
+        Request::at(Command::WRITE_KEY, u16::from(index) * KEY_RECORD_LEN as u16)
+            .with_payload(KeyTable::record(index, action)),
     )
-    .with_payload(KeyTable::record(index, action)))
 }
 
 /// Build the request that reads one 56-byte chunk of the key table.
@@ -498,33 +500,114 @@ pub fn read_key_chunk(offset: u16, layer: u8) -> Result<Request, ProtocolError> 
 pub const KEY_TABLE_READ_LENGTH: u8 = 58;
 
 const KEYCODE_NAMES: &[(u8, &str)] = &[
-    (0x04, "a"), (0x05, "b"), (0x06, "c"), (0x07, "d"), (0x08, "e"), (0x09, "f"),
-    (0x0A, "g"), (0x0B, "h"), (0x0C, "i"), (0x0D, "j"), (0x0E, "k"), (0x0F, "l"),
-    (0x10, "m"), (0x11, "n"), (0x12, "o"), (0x13, "p"), (0x14, "q"), (0x15, "r"),
-    (0x16, "s"), (0x17, "t"), (0x18, "u"), (0x19, "v"), (0x1A, "w"), (0x1B, "x"),
-    (0x1C, "y"), (0x1D, "z"),
-    (0x1E, "1"), (0x1F, "2"), (0x20, "3"), (0x21, "4"), (0x22, "5"),
-    (0x23, "6"), (0x24, "7"), (0x25, "8"), (0x26, "9"), (0x27, "0"),
-    (0x28, "enter"), (0x29, "escape"), (0x2A, "backspace"), (0x2B, "tab"),
-    (0x2C, "space"), (0x2D, "minus"), (0x2E, "equal"), (0x2F, "left-bracket"),
-    (0x30, "right-bracket"), (0x31, "backslash"), (0x33, "semicolon"),
-    (0x34, "quote"), (0x35, "grave"), (0x36, "comma"), (0x37, "dot"),
-    (0x38, "slash"), (0x39, "capslock"),
-    (0x3A, "f1"), (0x3B, "f2"), (0x3C, "f3"), (0x3D, "f4"),
-    (0x3E, "f5"), (0x3F, "f6"), (0x40, "f7"), (0x41, "f8"),
-    (0x42, "f9"), (0x43, "f10"), (0x44, "f11"), (0x45, "f12"),
-    (0x46, "printscreen"), (0x47, "scrolllock"), (0x48, "pause"),
-    (0x49, "insert"), (0x4A, "home"), (0x4B, "pageup"),
-    (0x4C, "delete"), (0x4D, "end"), (0x4E, "pagedown"),
-    (0x4F, "right"), (0x50, "left"), (0x51, "down"), (0x52, "up"),
-    (0x53, "numlock"), (0x54, "kp-slash"), (0x55, "kp-asterisk"),
-    (0x56, "kp-minus"), (0x57, "kp-plus"), (0x58, "kp-enter"),
-    (0x59, "kp-1"), (0x5A, "kp-2"), (0x5B, "kp-3"), (0x5C, "kp-4"),
-    (0x5D, "kp-5"), (0x5E, "kp-6"), (0x5F, "kp-7"), (0x60, "kp-8"),
-    (0x61, "kp-9"), (0x62, "kp-0"), (0x63, "kp-dot"),
-    (0x65, "app"), (0x68, "f13"), (0x69, "f14"), (0x6A, "f15"), (0x6B, "f16"),
-    (0x6C, "f17"), (0x6D, "f18"), (0x6E, "f19"), (0x6F, "f20"),
-    (0x70, "f21"), (0x71, "f22"), (0x72, "f23"), (0x73, "f24"),
+    (0x04, "a"),
+    (0x05, "b"),
+    (0x06, "c"),
+    (0x07, "d"),
+    (0x08, "e"),
+    (0x09, "f"),
+    (0x0A, "g"),
+    (0x0B, "h"),
+    (0x0C, "i"),
+    (0x0D, "j"),
+    (0x0E, "k"),
+    (0x0F, "l"),
+    (0x10, "m"),
+    (0x11, "n"),
+    (0x12, "o"),
+    (0x13, "p"),
+    (0x14, "q"),
+    (0x15, "r"),
+    (0x16, "s"),
+    (0x17, "t"),
+    (0x18, "u"),
+    (0x19, "v"),
+    (0x1A, "w"),
+    (0x1B, "x"),
+    (0x1C, "y"),
+    (0x1D, "z"),
+    (0x1E, "1"),
+    (0x1F, "2"),
+    (0x20, "3"),
+    (0x21, "4"),
+    (0x22, "5"),
+    (0x23, "6"),
+    (0x24, "7"),
+    (0x25, "8"),
+    (0x26, "9"),
+    (0x27, "0"),
+    (0x28, "enter"),
+    (0x29, "escape"),
+    (0x2A, "backspace"),
+    (0x2B, "tab"),
+    (0x2C, "space"),
+    (0x2D, "minus"),
+    (0x2E, "equal"),
+    (0x2F, "left-bracket"),
+    (0x30, "right-bracket"),
+    (0x31, "backslash"),
+    (0x33, "semicolon"),
+    (0x34, "quote"),
+    (0x35, "grave"),
+    (0x36, "comma"),
+    (0x37, "dot"),
+    (0x38, "slash"),
+    (0x39, "capslock"),
+    (0x3A, "f1"),
+    (0x3B, "f2"),
+    (0x3C, "f3"),
+    (0x3D, "f4"),
+    (0x3E, "f5"),
+    (0x3F, "f6"),
+    (0x40, "f7"),
+    (0x41, "f8"),
+    (0x42, "f9"),
+    (0x43, "f10"),
+    (0x44, "f11"),
+    (0x45, "f12"),
+    (0x46, "printscreen"),
+    (0x47, "scrolllock"),
+    (0x48, "pause"),
+    (0x49, "insert"),
+    (0x4A, "home"),
+    (0x4B, "pageup"),
+    (0x4C, "delete"),
+    (0x4D, "end"),
+    (0x4E, "pagedown"),
+    (0x4F, "right"),
+    (0x50, "left"),
+    (0x51, "down"),
+    (0x52, "up"),
+    (0x53, "numlock"),
+    (0x54, "kp-slash"),
+    (0x55, "kp-asterisk"),
+    (0x56, "kp-minus"),
+    (0x57, "kp-plus"),
+    (0x58, "kp-enter"),
+    (0x59, "kp-1"),
+    (0x5A, "kp-2"),
+    (0x5B, "kp-3"),
+    (0x5C, "kp-4"),
+    (0x5D, "kp-5"),
+    (0x5E, "kp-6"),
+    (0x5F, "kp-7"),
+    (0x60, "kp-8"),
+    (0x61, "kp-9"),
+    (0x62, "kp-0"),
+    (0x63, "kp-dot"),
+    (0x65, "app"),
+    (0x68, "f13"),
+    (0x69, "f14"),
+    (0x6A, "f15"),
+    (0x6B, "f16"),
+    (0x6C, "f17"),
+    (0x6D, "f18"),
+    (0x6E, "f19"),
+    (0x6F, "f20"),
+    (0x70, "f21"),
+    (0x71, "f22"),
+    (0x72, "f23"),
+    (0x73, "f24"),
 ];
 
 #[cfg(test)]
@@ -534,34 +617,58 @@ mod tests {
     #[test]
     fn standard_key_record_matches_documented_bytes() {
         // Ctrl+C: modifier bit 0 is Ctrl (0x01)
-        let record = KeyTable::record(0, KeyType::Standard {
-            modifiers: Modifiers::LCTRL,
-            code: KeyCode(0x03),
-        });
+        let record = KeyTable::record(
+            0,
+            KeyType::Standard {
+                modifiers: Modifiers::LCTRL,
+                code: KeyCode(0x03),
+            },
+        );
         assert_eq!(record, [0x20, 0x01, 0x03, 0x00]);
     }
 
     #[test]
     fn media_record_matches_documented_bytes() {
         // knob press = MUTE, from PROTOCOL.md
-        let record = KeyTable::record(16, KeyType::Media { usage: consumer::MUTE });
+        let record = KeyTable::record(
+            16,
+            KeyType::Media {
+                usage: consumer::MUTE,
+            },
+        );
         assert_eq!(record, [0x30, 0xE2, 0x00, 0x00]);
     }
 
     #[test]
     fn media_usage_spans_two_bytes_little_endian() {
-        let record = KeyTable::record(17, KeyType::Media { usage: consumer::VOLUME_UP });
+        let record = KeyTable::record(
+            17,
+            KeyType::Media {
+                usage: consumer::VOLUME_UP,
+            },
+        );
         assert_eq!(record, [0x30, 0xE9, 0x00, 0x00]);
-        assert_eq!(KeyType::from_record(record).unwrap(), KeyType::Media { usage: 0xE9 });
+        assert_eq!(
+            KeyType::from_record(record).unwrap(),
+            KeyType::Media { usage: 0xE9 }
+        );
     }
 
     #[test]
     fn records_round_trip_through_the_decoder() {
         let cases = [
             KeyType::Unassigned,
-            KeyType::Standard { modifiers: Modifiers::LALT, code: KeyCode::A },
-            KeyType::Standard { modifiers: Modifiers(0x01), code: KeyCode(0x03) },
-            KeyType::Media { usage: consumer::VOLUME_DOWN },
+            KeyType::Standard {
+                modifiers: Modifiers::LALT,
+                code: KeyCode::A,
+            },
+            KeyType::Standard {
+                modifiers: Modifiers(0x01),
+                code: KeyCode(0x03),
+            },
+            KeyType::Media {
+                usage: consumer::VOLUME_DOWN,
+            },
             KeyType::Macro { index: 3 },
             KeyType::Wheel { up: true },
             KeyType::Wheel { up: false },
@@ -573,7 +680,11 @@ mod tests {
         ];
         for action in cases {
             let record = KeyTable::record(0, action);
-            assert_eq!(KeyType::from_record(record).unwrap(), action, "round trip {action:?}");
+            assert_eq!(
+                KeyType::from_record(record).unwrap(),
+                action,
+                "round trip {action:?}"
+            );
         }
     }
 
@@ -671,7 +782,8 @@ mod tests {
         }
         for buttons in [mouse::LEFT, mouse::RIGHT, mouse::MIDDLE, 0x07, 0x08] {
             assert_eq!(mouse::parse(&mouse::name(buttons)), Some(buttons));
-        }    }
+        }
+    }
 
     #[test]
     fn the_vertical_sign_bit_is_set_so_the_cursor_moves_the_intuitive_way() {

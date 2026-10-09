@@ -34,6 +34,7 @@ COMMANDS:
     led key <N> <#RRGGBB> Set one key's backlight colour
     snapshot <FILE>      Save the current configuration as JSON
     apply <FILE>         Program a configuration saved by `snapshot`
+    profile [N]          Show or switch the active profile
     watch [SECONDS]      Show what the pad emits as you press it
 
 ACTIONS:
@@ -42,7 +43,6 @@ ACTIONS:
     key:<mods>-<name>       with modifiers, e.g. key:ctrl-c, key:ctrl-shift-t
     media:<name>            e.g. media:volume-up, media:mute, media:0xea
     move:<dx>,<dy>          relative cursor motion
-    url:<target>            launch a URL
 
 LED OPTIONS (for `led on`):
     -b, --brightness <0-4>  Brightness; 0 is off
@@ -110,6 +110,7 @@ fn run() -> anyhow::Result<()> {
         },
         "snapshot" => cmd_snapshot(rest, layer),
         "apply" => cmd_apply(rest),
+        "profile" => cmd_profile(rest),
         "watch" => cmd_watch(rest),
         other => {
             eprint!("{USAGE}");
@@ -156,7 +157,11 @@ fn cmd_info(layer: u8) -> anyhow::Result<()> {
         info.protocol_version >> 8,
         info.protocol_version & 0xFF,
         info.battery_percent,
-        if info.charge_state != 0 { " (charging)" } else { "" }
+        if info.charge_state != 0 {
+            " (charging)"
+        } else {
+            ""
+        }
     );
     println!(
         "  profiles {} (current {})   layers reported {} (current {}, device counts from 1)",
@@ -211,8 +216,10 @@ fn describe_action(action: KeyType) -> String {
         KeyType::Macro { index } => format!("macro:{index}"),
         KeyType::Wheel { up } => format!("wheel:{}", if up { "up" } else { "down" }),
         KeyType::MouseMove(motion) => format!("move:{},{}", motion.dx, motion.dy),
-        KeyType::OpenWebsite => "url:...".to_string(),
-        KeyType::CustomCombination => "custom:...".to_string(),
+        // Read-only: this build cannot write one, so say so rather than
+        // rendering something that looks like a settable binding.
+        KeyType::OpenWebsite => "url:<cannot be set by this build>".to_string(),
+        KeyType::CustomCombination => "custom:<not decoded by this build>".to_string(),
     }
 }
 
@@ -286,7 +293,10 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
         println!("    stored: ok");
         println!("\n  Press that control to confirm it emits the new action.");
     } else {
-        println!("    stored: MISMATCH — device returned {}", describe_action(stored));
+        println!(
+            "    stored: MISMATCH — device returned {}",
+            describe_action(stored)
+        );
         anyhow::bail!("write did not take effect; the device kept its previous value");
     }
     Ok(())
@@ -337,11 +347,15 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
         };
         if arity == 2 {
             match name {
-                "--brightness" => brightness = Some(value(i)?.parse().context("brightness must be 0-4")?),
+                "--brightness" => {
+                    brightness = Some(value(i)?.parse().context("brightness must be 0-4")?)
+                }
                 "--mode" => mode = Some(value(i)?.parse().context("mode must be a number")?),
                 "--color" => colour = Some(value(i)?),
                 "--speed" => speed = Some(value(i)?.parse().context("speed must be a number")?),
-                "--direction" => direction = Some(value(i)?.parse().context("direction must be 0-3")?),
+                "--direction" => {
+                    direction = Some(value(i)?.parse().context("direction must be 0-3")?)
+                }
                 _ => unreachable!(),
             }
         }
@@ -492,16 +506,66 @@ fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     let table = pad.read_keys(layer)?;
 
-    let mut file = ConfigFile::from_table(&table, layer);
+    let info = pad.device_info()?;
+    let mut file = ConfigFile::from_table_in_profile(&table, layer, Some(info.current_profile));
     file.device = Some(config::Device {
         vendor_id: pad.vendor_id(),
         product_id: pad.product_id(),
         name: pad.product_name().to_string(),
     });
 
-    std::fs::write(path, file.to_json()?)
-        .with_context(|| format!("could not write {path}"))?;
-    println!("wrote {path} ({} keys on layer {layer})", file.keys.len());
+    std::fs::write(path, file.to_json()?).with_context(|| format!("could not write {path}"))?;
+    println!(
+        "wrote {path} ({} keys on layer {layer}, profile {})",
+        file.keys.len(),
+        file.profile.unwrap_or(0)
+    );
+    Ok(())
+}
+
+/// Show the active profile, or switch to another.
+///
+/// Profiles hold independent key tables, so the profile in force decides which
+/// table `dump`, `set` and `apply` read and write.
+fn cmd_profile(args: &[String]) -> anyhow::Result<()> {
+    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    let pad = Pad::open()?;
+    let info = pad.device_info()?;
+
+    let Some(arg) = positional.first() else {
+        println!(
+            "  profile {} of {} (the device counts from 0)",
+            info.current_profile, info.profile_count
+        );
+        let table = pad.read_keys(0)?;
+        let assigned = (0..keymap::KEY_SLOTS)
+            .filter(|i| table.get(*i).is_some_and(|a| a != KeyType::Unassigned))
+            .count();
+        println!("  {assigned} key(s) bound on layer 0 of this profile");
+        return Ok(());
+    };
+
+    let target: u8 = arg
+        .parse()
+        .with_context(|| format!("profile '{arg}' is not a number"))?;
+    if info.profile_count > 0 && target >= info.profile_count {
+        anyhow::bail!(
+            "profile {target} does not exist; this pad has {} (0-{})",
+            info.profile_count,
+            info.profile_count - 1
+        );
+    }
+
+    pad.set_profile(target)?;
+    // Read the device back rather than trusting the write.
+    let after = pad.device_info()?;
+    if after.current_profile != target {
+        anyhow::bail!(
+            "could not switch to profile {target}: device still reports {}",
+            after.current_profile
+        );
+    }
+    println!("  now on profile {}", after.current_profile);
     Ok(())
 }
 
@@ -522,13 +586,27 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
         if device.product_id != pad.product_id() || device.vendor_id != pad.vendor_id() {
             println!(
                 "  warning: {} was captured from {:04x}:{:04x}, this pad is {:04x}:{:04x}",
-                path, device.vendor_id, device.product_id, pad.vendor_id(), pad.product_id()
+                path,
+                device.vendor_id,
+                device.product_id,
+                pad.vendor_id(),
+                pad.product_id()
             );
         }
     }
 
     // The file's layer wins over --layer: applying a file to a different layer
     // than the one it describes would be surprising.
+    let info = pad.device_info()?;
+    if let Some(want) = file.profile {
+        if want != info.current_profile {
+            println!(
+                "  warning: {} was captured on profile {want}, the pad is on profile {}; \
+                 switch with `minikbconfig profile {want}` or apply anyway",
+                path, info.current_profile
+            );
+        }
+    }
     let layer = file.layer;
     let current = pad.read_keys(layer)?;
     let plan = Plan::between(&file, &current)?;
@@ -551,7 +629,10 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
     }
 
     if dry_run {
-        println!("\n  {} change(s); not applied (--dry-run)", plan.changes.len());
+        println!(
+            "\n  {} change(s); not applied (--dry-run)",
+            plan.changes.len()
+        );
         return Ok(());
     }
     if !assume_yes && !confirm(&format!("apply {} change(s)?", plan.changes.len()))? {
@@ -593,7 +674,10 @@ fn confirm(question: &str) -> anyhow::Result<bool> {
     std::io::Write::flush(&mut std::io::stdout())?;
     let mut answer = String::new();
     std::io::BufRead::read_line(&mut stdin.lock(), &mut answer)?;
-    Ok(matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 fn cmd_watch(args: &[String]) -> anyhow::Result<()> {

@@ -7,9 +7,9 @@ use minikbconfig_core::keymap::{consumer, KeyCode, KeyType, Modifiers};
 /// Errors from parsing an action string.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ParseError {
-    #[error("action must have a kind prefix, e.g. 'key:ctrl-c', 'media:mute', 'mouse:left'")]
+    #[error("action must have a kind prefix, e.g. 'key:ctrl-c', 'media:mute'")]
     MissingKind,
-    #[error("unknown action kind '{kind}'; expected key, media, mouse, move, none or url")]
+    #[error("unknown action kind '{kind}'; expected key, media, move or none")]
     UnknownKind { kind: String },
     #[error("could not parse key name '{name}'; try a name like 'f13', 'space' or '0x6d'")]
     BadKey { name: String },
@@ -20,7 +20,9 @@ pub enum ParseError {
          binding: type 0x60 is a macro index and type 0x70 is the mouse wheel"
     )]
     BadMouse { name: String },
-    #[error("could not parse mouse movement '{spec}'; expected 'move:<dx>,<dy>' with signed integers")]
+    #[error(
+        "could not parse mouse movement '{spec}'; expected 'move:<dx>,<dy>' with signed integers"
+    )]
     BadMove { spec: String },
     #[error(
         "'{name}' is not a key type this device has. Type 0x70 is the mouse wheel \
@@ -28,6 +30,14 @@ pub enum ParseError {
          data that is not implemented"
     )]
     BadDuration { name: String },
+
+    #[error(
+        "URL bindings are not implemented. Type 0x80 only records *that* a key opens \
+         a URL; the target itself is stored separately by command 0x40, which is \
+         unverified, so writing one now would leave a key that reads back as bound \
+         and does nothing"
+    )]
+    UnsupportedUrl,
 }
 
 /// Parse an action string into a device binding.
@@ -42,7 +52,6 @@ pub enum ParseError {
 /// media:volume-up            consumer usage
 /// media:0xea                  consumer usage by number
 /// move:10,-5                  relative cursor motion
-/// url:<target>                launch a URL
 /// ```
 pub fn parse_action(input: &str) -> Result<KeyType, ParseError> {
     let input = input.trim();
@@ -59,22 +68,37 @@ pub fn parse_action(input: &str) -> Result<KeyType, ParseError> {
 
     match kind.to_ascii_lowercase().as_str() {
         "key" | "combo" => parse_key(rest),
-        "media" | "consumer" => consumer::parse(rest)
-            .map(KeyType::media)
-            .ok_or_else(|| ParseError::BadMedia { name: rest.to_string() }),
-        "mouse" => Err(ParseError::BadMouse { name: rest.to_string() }),
+        "media" | "consumer" => {
+            consumer::parse(rest)
+                .map(KeyType::media)
+                .ok_or_else(|| ParseError::BadMedia {
+                    name: rest.to_string(),
+                })
+        }
+        "mouse" => Err(ParseError::BadMouse {
+            name: rest.to_string(),
+        }),
         "move" => parse_move(rest),
-        "delay" => Err(ParseError::BadDuration { name: rest.to_string() }),
-        "url" | "website" => Ok(KeyType::OpenWebsite),
-        other => Err(ParseError::UnknownKind { kind: other.to_string() }),
+        "delay" => Err(ParseError::BadDuration {
+            name: rest.to_string(),
+        }),
+        "url" | "website" => Err(ParseError::UnsupportedUrl),
+        other => Err(ParseError::UnknownKind {
+            kind: other.to_string(),
+        }),
     }
 }
 
 fn parse_key(rest: &str) -> Result<KeyType, ParseError> {
     // Split trailing modifier tokens from the final key name: "ctrl-shift-f13".
     let (mods, key) = split_modifiers(rest);
-    let code = KeyCode::parse(key).ok_or_else(|| ParseError::BadKey { name: key.to_string() })?;
-    Ok(KeyType::Standard { modifiers: mods, code })
+    let code = KeyCode::parse(key).ok_or_else(|| ParseError::BadKey {
+        name: key.to_string(),
+    })?;
+    Ok(KeyType::Standard {
+        modifiers: mods,
+        code,
+    })
 }
 
 /// Peel modifier tokens off either end, so `ctrl-c`, `c-ctrl` and
@@ -117,11 +141,16 @@ fn split_modifiers(input: &str) -> (Modifiers, &str) {
 }
 
 fn parse_move(rest: &str) -> Result<KeyType, ParseError> {
-    let bad = || ParseError::BadMove { spec: rest.to_string() };
+    let bad = || ParseError::BadMove {
+        spec: rest.to_string(),
+    };
     let (dx, dy) = rest.split_once(',').ok_or_else(bad)?;
     let dx: i16 = dx.trim().parse().map_err(|_| bad())?;
     let dy: i16 = dy.trim().parse().map_err(|_| bad())?;
-    Ok(KeyType::MouseMove(minikbconfig_core::keymap::MouseMove { dx, dy }))
+    Ok(KeyType::MouseMove(minikbconfig_core::keymap::MouseMove {
+        dx,
+        dy,
+    }))
 }
 
 #[cfg(test)]
@@ -133,7 +162,10 @@ mod tests {
     fn plain_keystrokes() {
         assert_eq!(parse_action("key:a").unwrap(), KeyType::key(KeyCode::A));
         assert_eq!(parse_action("key:f13").unwrap(), KeyType::key(KeyCode::F13));
-        assert_eq!(parse_action("key:space").unwrap(), KeyType::key(KeyCode::SPACE));
+        assert_eq!(
+            parse_action("key:space").unwrap(),
+            KeyType::key(KeyCode::SPACE)
+        );
     }
 
     #[test]
@@ -142,8 +174,10 @@ mod tests {
         let expected = KeyType::combo(Modifiers::LCTRL, KeyCode(0x06));
         assert_eq!(parse_action("key:ctrl-c").unwrap(), expected);
         assert_eq!(parse_action("key:c-ctrl").unwrap(), expected);
-        assert_eq!(parse_action("key:ctrl-shift-f13").unwrap(),
-                   KeyType::combo(Modifiers(0x03), KeyCode::F13));
+        assert_eq!(
+            parse_action("key:ctrl-shift-f13").unwrap(),
+            KeyType::combo(Modifiers(0x03), KeyCode::F13)
+        );
     }
 
     #[test]
@@ -177,7 +211,10 @@ mod tests {
     fn a_dash_that_is_not_a_separator_is_left_alone() {
         // "1" is not a modifier, so "f-1" must not be split into key "f" with
         // something on modifier 1; it is simply not a key this build knows.
-        assert!(matches!(parse_action("key:f-1"), Err(ParseError::BadKey { .. })));
+        assert!(matches!(
+            parse_action("key:f-1"),
+            Err(ParseError::BadKey { .. })
+        ));
     }
 
     #[test]
@@ -189,7 +226,10 @@ mod tests {
 
     #[test]
     fn hex_keycodes_are_accepted() {
-        assert_eq!(parse_action("key:0x6d").unwrap(), KeyType::key(KeyCode::F18));
+        assert_eq!(
+            parse_action("key:0x6d").unwrap(),
+            KeyType::key(KeyCode::F18)
+        );
     }
 
     #[test]
@@ -200,8 +240,14 @@ mod tests {
 
     #[test]
     fn media_actions() {
-        assert_eq!(parse_action("media:volume-up").unwrap(), KeyType::media(0xE9));
-        assert_eq!(parse_action("media:mute").unwrap(), KeyType::media(consumer::MUTE));
+        assert_eq!(
+            parse_action("media:volume-up").unwrap(),
+            KeyType::media(0xE9)
+        );
+        assert_eq!(
+            parse_action("media:mute").unwrap(),
+            KeyType::media(consumer::MUTE)
+        );
         assert_eq!(parse_action("media:0xea").unwrap(), KeyType::media(0xEA));
     }
 
@@ -210,15 +256,24 @@ mod tests {
         // Type 0x60 is a macro index and 0x70 is the wheel; there is no
         // mouse-button key binding, so this must fail loudly rather than
         // silently writing a macro reference.
-        assert!(matches!(parse_action("mouse:left"), Err(ParseError::BadMouse { .. })));
-        assert!(matches!(parse_action("mouse:left+middle"), Err(ParseError::BadMouse { .. })));
+        assert!(matches!(
+            parse_action("mouse:left"),
+            Err(ParseError::BadMouse { .. })
+        ));
+        assert!(matches!(
+            parse_action("mouse:left+middle"),
+            Err(ParseError::BadMouse { .. })
+        ));
         let err = format!("{:#}", parse_action("mouse:left").unwrap_err());
         assert!(err.contains("macro"), "explains what 0x60 really is: {err}");
     }
 
     #[test]
     fn delays_are_refused_because_type_seventy_is_the_wheel() {
-        assert!(matches!(parse_action("delay:250"), Err(ParseError::BadDuration { .. })));
+        assert!(matches!(
+            parse_action("delay:250"),
+            Err(ParseError::BadDuration { .. })
+        ));
         let err = format!("{:#}", parse_action("delay:250").unwrap_err());
         assert!(err.contains("wheel"), "explains what 0x70 really is: {err}");
     }
@@ -238,25 +293,59 @@ mod tests {
         assert_eq!(KeyType::from_record(record).unwrap(), action);
     }
 
+    #[test]
+    fn clearing_a_slot() {
+        assert_eq!(parse_action("none").unwrap(), KeyType::Unassigned);
+        assert_eq!(parse_action("off").unwrap(), KeyType::Unassigned);
+        assert_eq!(parse_action("clear").unwrap(), KeyType::Unassigned);
+    }
 
     #[test]
-    fn clearing_and_urls() {
-        assert_eq!(parse_action("none").unwrap(), KeyType::Unassigned);
-        assert_eq!(parse_action("url:example.com").unwrap(), KeyType::OpenWebsite);
+    fn urls_are_refused_because_the_target_cannot_be_written() {
+        // Type 0x80 alone produces a key that reads back as bound and does
+        // nothing, because the URL itself lives behind unverified command 0x40.
+        assert_eq!(
+            parse_action("url:example.com"),
+            Err(ParseError::UnsupportedUrl)
+        );
+        assert_eq!(
+            parse_action("website:example.com"),
+            Err(ParseError::UnsupportedUrl)
+        );
+        let err = parse_action("url:example.com").unwrap_err().to_string();
+        assert!(err.contains("0x40"), "names the missing command: {err}");
     }
 
     #[test]
     fn errors_are_specific() {
         assert_eq!(parse_action("nonsense"), Err(ParseError::MissingKind));
-        assert!(matches!(parse_action("bogus:a"), Err(ParseError::UnknownKind { .. })));
-        assert!(matches!(parse_action("key:nonexistent"), Err(ParseError::BadKey { .. })));
-        assert!(matches!(parse_action("media:nope"), Err(ParseError::BadMedia { .. })));
-        assert!(matches!(parse_action("move:abc"), Err(ParseError::BadMove { .. })));
+        assert!(matches!(
+            parse_action("bogus:a"),
+            Err(ParseError::UnknownKind { .. })
+        ));
+        assert!(matches!(
+            parse_action("key:nonexistent"),
+            Err(ParseError::BadKey { .. })
+        ));
+        assert!(matches!(
+            parse_action("media:nope"),
+            Err(ParseError::BadMedia { .. })
+        ));
+        assert!(matches!(
+            parse_action("move:abc"),
+            Err(ParseError::BadMove { .. })
+        ));
     }
 
     #[test]
     fn input_is_case_and_space_insensitive() {
-        assert_eq!(parse_action("  KEY:F18  ").unwrap(), KeyType::key(KeyCode::F18));
-        assert_eq!(parse_action("Media:Volume-Up").unwrap(), KeyType::media(0xE9));
+        assert_eq!(
+            parse_action("  KEY:F18  ").unwrap(),
+            KeyType::key(KeyCode::F18)
+        );
+        assert_eq!(
+            parse_action("Media:Volume-Up").unwrap(),
+            KeyType::media(0xE9)
+        );
     }
 }

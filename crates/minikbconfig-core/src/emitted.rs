@@ -17,7 +17,12 @@ pub enum Emitted {
     /// A Consumer-page usage (report 3 or 5).
     Consumer { usage: u16 },
     /// A mouse event (report 2).
-    Mouse { buttons: u8, dx: i16, dy: i16, wheel: i8 },
+    Mouse {
+        buttons: u8,
+        dx: i16,
+        dy: i16,
+        wheel: i8,
+    },
     /// A System-control usage (report 4).
     SystemControl { usage: u8 },
     /// A report this build does not recognise.
@@ -40,7 +45,10 @@ impl Emitted {
     /// Decode a report from the report-ID interface.
     pub fn from_numbered(report: &[u8]) -> Emitted {
         let Some(&report_id) = report.first() else {
-            return Emitted::Unknown { report_id: 0, data: Vec::new() };
+            return Emitted::Unknown {
+                report_id: 0,
+                data: Vec::new(),
+            };
         };
         let data = &report[1..];
         match report_id {
@@ -57,14 +65,27 @@ impl Emitted {
                 let dx = read_i16(data, 1);
                 let dy = read_i16(data, 3);
                 let wheel = data.get(5).copied().unwrap_or(0) as i8;
-                Emitted::Mouse { buttons, dx, dy, wheel }
+                Emitted::Mouse {
+                    buttons,
+                    dx,
+                    dy,
+                    wheel,
+                }
             }
             3 | 5 => {
-                let usage = u16::from_le_bytes([data.first().copied().unwrap_or(0), *data.get(1).unwrap_or(&0)]);
+                let usage = u16::from_le_bytes([
+                    data.first().copied().unwrap_or(0),
+                    *data.get(1).unwrap_or(&0),
+                ]);
                 Emitted::Consumer { usage }
             }
-            4 => Emitted::SystemControl { usage: data.first().copied().unwrap_or(0) & 0x07 },
-            other => Emitted::Unknown { report_id: other, data: data.to_vec() },
+            4 => Emitted::SystemControl {
+                usage: data.first().copied().unwrap_or(0) & 0x07,
+            },
+            other => Emitted::Unknown {
+                report_id: other,
+                data: data.to_vec(),
+            },
         }
     }
 
@@ -76,9 +97,12 @@ impl Emitted {
                 *modifiers == 0 && codes.is_empty()
             }
             Emitted::Consumer { usage } => *usage == 0,
-            Emitted::Mouse { buttons, dx, dy, wheel } => {
-                *buttons == 0 && *dx == 0 && *dy == 0 && *wheel == 0
-            }
+            Emitted::Mouse {
+                buttons,
+                dx,
+                dy,
+                wheel,
+            } => *buttons == 0 && *dx == 0 && *dy == 0 && *wheel == 0,
             Emitted::SystemControl { usage } => *usage == 0,
             Emitted::Unknown { data, .. } => data.iter().all(|b| *b == 0),
         }
@@ -95,7 +119,9 @@ impl Emitted {
     /// The primary keycode, if this is a keystroke.
     pub fn keycode(&self) -> Option<u8> {
         match self {
-            Emitted::Key { codes, .. } | Emitted::NumberedKey { codes, .. } => codes.first().copied(),
+            Emitted::Key { codes, .. } | Emitted::NumberedKey { codes, .. } => {
+                codes.first().copied()
+            }
             _ => None,
         }
     }
@@ -121,7 +147,12 @@ impl Emitted {
             Emitted::Consumer { usage } => {
                 format!("media:{}", crate::keymap::consumer::name(*usage))
             }
-            Emitted::Mouse { buttons, dx, dy, wheel } => format!(
+            Emitted::Mouse {
+                buttons,
+                dx,
+                dy,
+                wheel,
+            } => format!(
                 "mouse:{} dx={dx} dy={dy} wheel={wheel}",
                 crate::keymap::mouse::name(*buttons)
             ),
@@ -212,20 +243,40 @@ mod tests {
     fn mouse_report_decodes_signed_axes() {
         // buttons=1, x=10, y=-5, wheel=3
         let report = [0x02, 0x01, 0x0A, 0x00, 0xFB, 0xFF, 0x03, 0x00];
-        let expected = Emitted::Mouse { buttons: 1, dx: 10, dy: -5, wheel: 3 };
+        let expected = Emitted::Mouse {
+            buttons: 1,
+            dx: 10,
+            dy: -5,
+            wheel: 3,
+        };
         assert_eq!(Emitted::from_numbered(&report), expected);
-        assert_eq!(Emitted::from_numbered(&report).describe(), "mouse:left dx=10 dy=-5 wheel=3");
+        assert_eq!(
+            Emitted::from_numbered(&report).describe(),
+            "mouse:left dx=10 dy=-5 wheel=3"
+        );
     }
 
     #[test]
     fn unknown_report_ids_are_surfaced_not_dropped() {
         let event = Emitted::from_numbered(&[0x42, 0x01, 0x02]);
-        assert_eq!(event, Emitted::Unknown { report_id: 0x42, data: vec![0x01, 0x02] });
+        assert_eq!(
+            event,
+            Emitted::Unknown {
+                report_id: 0x42,
+                data: vec![0x01, 0x02]
+            }
+        );
     }
 
     #[test]
     fn short_input_is_handled_without_panicking() {
-        assert_eq!(Emitted::from_boot(&[]), Emitted::Key { modifiers: 0, codes: Vec::new() });
+        assert_eq!(
+            Emitted::from_boot(&[]),
+            Emitted::Key {
+                modifiers: 0,
+                codes: Vec::new()
+            }
+        );
         let event = Emitted::from_numbered(&[0x02]);
         assert!(matches!(event, Emitted::Mouse { dx: 0, dy: 0, .. }));
     }

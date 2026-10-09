@@ -39,12 +39,24 @@ pub struct Request {
 impl Request {
     /// A request with no payload, e.g. `get_keyboard_config` (`05`).
     pub fn new(command: u8) -> Self {
-        Self { command, offset: 0, layer: 0, payload: Vec::new(), fixed_length: None }
+        Self {
+            command,
+            offset: 0,
+            layer: 0,
+            payload: Vec::new(),
+            fixed_length: None,
+        }
     }
 
     /// A request addressing a block offset or key index.
     pub fn at(command: u8, offset: u16) -> Self {
-        Self { command, offset, layer: 0, payload: Vec::new(), fixed_length: None }
+        Self {
+            command,
+            offset,
+            layer: 0,
+            payload: Vec::new(),
+            fixed_length: None,
+        }
     }
 
     pub fn with_layer(mut self, layer: u8) -> Self {
@@ -80,7 +92,9 @@ impl Request {
     /// Serialise to the 64-byte wire report.
     pub fn to_report(&self) -> Result<[u8; REPORT_LEN], ProtocolError> {
         if self.payload.len() > MAX_PAYLOAD {
-            return Err(ProtocolError::PayloadTooLong { len: self.payload.len() });
+            return Err(ProtocolError::PayloadTooLong {
+                len: self.payload.len(),
+            });
         }
         let mut buf = [0u8; REPORT_LEN];
         buf[0] = PREFIX;
@@ -92,6 +106,27 @@ impl Request {
         buf[8..8 + self.payload.len()].copy_from_slice(&self.payload);
         Ok(buf)
     }
+}
+
+/// Build the report that selects the current profile (command `0xFB`).
+///
+/// The vendor sends `[251, index]` with **no length byte**, so the index lands
+/// in byte 2 — the position that holds a length for every other command.
+///
+/// This is a live trap. Sending the index as an ordinary payload at byte 8 with
+/// `length = 4` produces `06 FB 04 …`, and the firmware reads the *length byte*
+/// as the profile number: it accepts it without complaint and switches to
+/// profile 4. Observed on hardware 2026-10-09, where a probe meant to select
+/// profile 1 silently moved the pad to profile 4 and left it there.
+///
+/// That failure is silent in the worst way — the reply looks like a normal
+/// success and every subsequent read comes from the wrong profile.
+pub fn set_profile(index: u8) -> [u8; REPORT_LEN] {
+    let mut buf = [0u8; REPORT_LEN];
+    buf[0] = PREFIX;
+    buf[1] = 0xFB;
+    buf[2] = index;
+    buf
 }
 
 /// True if a reply belongs to a given request.
@@ -162,13 +197,19 @@ mod tests {
     #[test]
     fn read_key_layout_chunk_request_matches_documented_bytes() {
         // Reads announce a fixed length of 0x3A, so they use read_key_chunk.
-        let r = crate::keymap::read_key_chunk(0, 0).unwrap().to_report().unwrap();
+        let r = crate::keymap::read_key_chunk(0, 0)
+            .unwrap()
+            .to_report()
+            .unwrap();
         assert_eq!(&r[..8], &[0x06, 0x08, 0x3A, 0x00, 0x00, 0x00, 0x00, 0x00]);
     }
 
     #[test]
     fn read_key_layout_second_chunk_uses_little_endian_offset() {
-        let r = crate::keymap::read_key_chunk(56, 0).unwrap().to_report().unwrap();
+        let r = crate::keymap::read_key_chunk(56, 0)
+            .unwrap()
+            .to_report()
+            .unwrap();
         assert_eq!(&r[..8], &[0x06, 0x08, 0x3A, 0x38, 0x00, 0x00, 0x00, 0x00]);
     }
 
@@ -206,17 +247,24 @@ mod tests {
     fn length_byte_counts_the_three_byte_header() {
         let r = Request::new(Command::GET_CONFIG).to_report().unwrap();
         assert_eq!(r[2], 3);
-        let r = write_key(0, KeyAction::key(KeyCode::A)).unwrap().to_report().unwrap();
+        let r = write_key(0, KeyAction::key(KeyCode::A))
+            .unwrap()
+            .to_report()
+            .unwrap();
         assert_eq!(r[2], 7); // 3 + 4 byte key record
     }
 
     #[test]
     fn oversized_payload_is_rejected_rather_than_silently_truncated() {
         let payload = vec![0u8; MAX_PAYLOAD + 1];
-        let err = Request::new(Command::WRITE_KEY_LAYOUT_BULK).with_payload(payload).to_report();
+        let err = Request::new(Command::WRITE_KEY_LAYOUT_BULK)
+            .with_payload(payload)
+            .to_report();
         assert_eq!(
             err,
-            Err(ProtocolError::PayloadTooLong { len: MAX_PAYLOAD + 1 })
+            Err(ProtocolError::PayloadTooLong {
+                len: MAX_PAYLOAD + 1
+            })
         );
     }
 
@@ -250,12 +298,26 @@ mod tests {
     };
 
     #[test]
+    fn the_profile_index_goes_in_byte_two_not_in_a_payload() {
+        // The vendor sends [251, index] with no length byte, so the index lands
+        // in byte 2. Sending it as a payload at byte 8 with length 4 makes the
+        // firmware read that 4 as the profile number and silently switch to
+        // profile 4, so this is worth pinning.
+        let report = set_profile(3);
+        assert_eq!(&report[..3], &[0x06, 0xFB, 0x03]);
+        assert_eq!(report[2], 3, "index is byte 2");
+        assert!(
+            report[8..].iter().all(|b| *b == 0),
+            "and nothing else is set"
+        );
+    }
+
+    #[test]
     fn a_reply_is_matched_on_the_echoed_offset_not_the_command_byte() {
         let request = crate::keymap::read_key_chunk(0, 0).unwrap();
         assert_eq!(request.command, 0x08, "the request uses command 0x08");
         assert_eq!(
-            REAL_KEY_LAYOUT_REPLY[1],
-            0x07,
+            REAL_KEY_LAYOUT_REPLY[1], 0x07,
             "but the device answers with 0x07 in that slot"
         );
         assert!(is_reply_to(&request, &REAL_KEY_LAYOUT_REPLY));
@@ -278,6 +340,9 @@ mod tests {
     fn the_second_chunk_reply_matches_its_own_offset() {
         let mut reply = REAL_KEY_LAYOUT_REPLY;
         reply[3] = 0x38; // 56
-        assert!(is_reply_to(&crate::keymap::read_key_chunk(56, 0).unwrap(), &reply));
+        assert!(is_reply_to(
+            &crate::keymap::read_key_chunk(56, 0).unwrap(),
+            &reply
+        ));
     }
 }

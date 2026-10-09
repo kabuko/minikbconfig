@@ -26,7 +26,9 @@ const POLL_SLICE: Duration = Duration::from_millis(10);
 
 /// Convert a remaining duration into hidapi's millisecond timeout, never 0.
 fn timeout_ms(remaining: Duration) -> i32 {
-    i32::try_from(remaining.as_millis()).unwrap_or(i32::MAX).max(1)
+    i32::try_from(remaining.as_millis())
+        .unwrap_or(i32::MAX)
+        .max(1)
 }
 
 /// A pad whose configuration interface is open.
@@ -186,6 +188,16 @@ impl Pad {
         Ok(stored)
     }
 
+    /// Select the current profile (command `0xFB`).
+    ///
+    /// Profiles hold independent key tables, so this changes which table
+    /// `read_keys` and `write_key` act on.
+    pub fn set_profile(&self, index: u8) -> anyhow::Result<()> {
+        let report = minikbconfig_core::protocol::set_profile(index);
+        self.exchange_bytes(&report, 0xFB)?;
+        Ok(())
+    }
+
     /// Set one key's colour.
     pub fn set_key_color(&self, index: u8, rgb: [u8; 3]) -> anyhow::Result<()> {
         let report = light::set_key_color(index, rgb)?;
@@ -247,7 +259,11 @@ pub fn describe(pad: &Pad) -> String {
     } else {
         pad.product_name()
     };
-    format!("{name} (USB {:04x}:{:04x})", pad.vendor_id(), pad.product_id())
+    format!(
+        "{name} (USB {:04x}:{:04x})",
+        pad.vendor_id(),
+        pad.product_id()
+    )
 }
 
 /// Stream emitted keystrokes from the pad's input interfaces.

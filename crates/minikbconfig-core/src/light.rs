@@ -266,9 +266,17 @@ pub fn rgb_to_hsv([r, g, b]: [u8; 3]) -> [u8; 3] {
     } else {
         60.0 * (4.0 + (r as f32 - g as f32) / delta as f32)
     };
-    let hue_deg = if hue_deg < 0.0 { hue_deg + 360.0 } else { hue_deg };
+    let hue_deg = if hue_deg < 0.0 {
+        hue_deg + 360.0
+    } else {
+        hue_deg
+    };
 
-    let sat = if max == 0 { 0.0 } else { delta as f32 / max as f32 * 100.0 };
+    let sat = if max == 0 {
+        0.0
+    } else {
+        delta as f32 / max as f32 * 100.0
+    };
 
     // The vendor scales 0-360 / 0-100 / 0-100 down into bytes.
     [
@@ -310,7 +318,14 @@ mod tests {
 
     #[test]
     fn the_write_report_matches_the_vendor_layout() {
-        let config = LightConfig { mode: 1, brightness: 3, value: 255, hue: 0, saturation: 255, ..LightConfig::OFF };
+        let config = LightConfig {
+            mode: 1,
+            brightness: 3,
+            value: 255,
+            hue: 0,
+            saturation: 255,
+            ..LightConfig::OFF
+        };
         let report = write_light_config(config).unwrap();
         assert_eq!(report[0], 0x06);
         assert_eq!(report[1], 0x0B, "command");
@@ -328,7 +343,12 @@ mod tests {
         // Verified on hardware: sweeping modes 0-8, only 1-6 stuck. Mode 0 is
         // not "solid colour", it makes the firmware drop the whole record.
         for mode in 0..=8u8 {
-            let config = LightConfig { mode, brightness: 3, value: 255, ..LightConfig::OFF };
+            let config = LightConfig {
+                mode,
+                brightness: 3,
+                value: 255,
+                ..LightConfig::OFF
+            };
             let expected_ok = (1..=6).contains(&mode);
             assert_eq!(config.has_valid_mode(), expected_ok, "mode {mode}");
             let result = write_light_config(config);
@@ -338,7 +358,12 @@ mod tests {
 
     #[test]
     fn an_unusable_mode_explains_why_it_would_be_dropped() {
-        let config = LightConfig { mode: 0, brightness: 3, value: 255, ..LightConfig::OFF };
+        let config = LightConfig {
+            mode: 0,
+            brightness: 3,
+            value: 255,
+            ..LightConfig::OFF
+        };
         let err = write_light_config(config).unwrap_err().to_string();
         assert!(err.contains('0'), "names the mode: {err}");
         assert!(err.contains("silently"), "warns it would be dropped: {err}");
@@ -368,11 +393,25 @@ mod tests {
     #[test]
     fn a_black_colour_is_dark_however_bright() {
         // Guards the trap that made an earlier probe light nothing.
-        let black = LightConfig { brightness: 4, hue: 0, saturation: 255, value: 0, ..LightConfig::OFF };
+        let black = LightConfig {
+            brightness: 4,
+            hue: 0,
+            saturation: 255,
+            value: 0,
+            ..LightConfig::OFF
+        };
         assert!(!black.is_lit(), "value 0 means nothing to light");
-        let red = LightConfig { brightness: 4, value: 255, ..LightConfig::OFF };
+        let red = LightConfig {
+            brightness: 4,
+            value: 255,
+            ..LightConfig::OFF
+        };
         assert!(red.is_lit());
-        let bright_black = LightConfig { brightness: 0, value: 255, ..LightConfig::OFF };
+        let bright_black = LightConfig {
+            brightness: 0,
+            value: 255,
+            ..LightConfig::OFF
+        };
         assert!(!bright_black.is_lit(), "brightness 0 is off");
     }
 
@@ -437,6 +476,9 @@ mod tests {
 
     #[test]
     fn hex_parsing_accepts_both_spellings() {
-        assert_eq!(hex_to_hsv("#ff0000").unwrap(), hex_to_hsv("ff0000").unwrap());
+        assert_eq!(
+            hex_to_hsv("#ff0000").unwrap(),
+            hex_to_hsv("ff0000").unwrap()
+        );
     }
 }

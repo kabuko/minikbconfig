@@ -23,7 +23,9 @@ impl Response {
         if report.len() < REPORT_LEN {
             return Err(ProtocolError::ResponseTooShort { got: report.len() });
         }
-        if report[0] == crate::protocol::ASYNC_MARKER.0 && report[1] == crate::protocol::ASYNC_MARKER.1 {
+        if report[0] == crate::protocol::ASYNC_MARKER.0
+            && report[1] == crate::protocol::ASYNC_MARKER.1
+        {
             return Ok(None);
         }
         if report[0] != RESPONSE_MARKER {
@@ -118,7 +120,10 @@ mod tests {
     #[test]
     fn config_reply_yields_the_expected_device_info() {
         let info = DeviceInfo::parse(&REAL_CONFIG_REPLY).unwrap();
-        assert_eq!(info.product_id, 0xDCFA, "product ID should read back as 0xDCFA");
+        assert_eq!(
+            info.product_id, 0xDCFA,
+            "product ID should read back as 0xDCFA"
+        );
         assert_eq!(info.firmware_version, 0x0068);
         assert_eq!(info.battery_percent, 100);
         assert_eq!(info.profile_count, 6);

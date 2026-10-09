@@ -27,7 +27,7 @@ pub mod protocol;
 pub mod response;
 
 pub use emitted::Emitted;
-pub use keymap::{KeyTable, KeyType, KeyCode, Modifiers};
+pub use keymap::{KeyCode, KeyTable, KeyType, Modifiers};
 pub use light::LightConfig;
 pub use protocol::{ProtocolError, Request};
 pub use response::{DeviceInfo, Response};

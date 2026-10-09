@@ -45,12 +45,21 @@ pub struct ConfigFile {
     pub device: Option<Device>,
     #[serde(default)]
     pub layer: u8,
+    /// Which profile this was captured from. Profiles hold independent key
+    /// tables, so a snapshot without this is ambiguous.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<u8>,
     pub keys: Vec<Entry>,
 }
 
 impl ConfigFile {
-    /// Build a file describing a key table as read from a pad.
-    pub fn from_table(table: &KeyTable, layer: u8) -> ConfigFile {
+    /// Build a file describing a key table as read from a pad, recording
+    /// which profile it came from.
+    ///
+    /// There is deliberately no profile-less variant: profiles hold independent
+    /// key tables, so a snapshot that does not say which one it is describes is
+    /// ambiguous.
+    pub fn from_table_in_profile(table: &KeyTable, layer: u8, profile: Option<u8>) -> ConfigFile {
         let mut keys = Vec::new();
         for index in 0..keymap::KEY_SLOTS {
             if let Some(action) = table.get(index) {
@@ -75,7 +84,12 @@ impl ConfigFile {
             });
         }
         keys.sort_by_key(|e| e.index);
-        ConfigFile { device: None, layer, keys }
+        ConfigFile {
+            device: None,
+            layer,
+            profile,
+            keys,
+        }
     }
 
     /// Parse a config file, rejecting anything that would write a bad record.
@@ -101,13 +115,19 @@ impl ConfigFile {
         let mut seen = [false; keymap::KEY_SLOTS as usize];
         for entry in &self.keys {
             if entry.index >= keymap::KEY_SLOTS {
-                bail!("key index {} is out of range (max {})", entry.index, keymap::KEY_SLOTS - 1);
+                bail!(
+                    "key index {} is out of range (max {})",
+                    entry.index,
+                    keymap::KEY_SLOTS - 1
+                );
             }
             if seen[entry.index as usize] {
                 bail!("key index {} appears more than once", entry.index);
             }
             seen[entry.index as usize] = true;
-            entry.record().with_context(|| format!("key[{}]", entry.index))?;
+            entry
+                .record()
+                .with_context(|| format!("key[{}]", entry.index))?;
         }
         Ok(())
     }
@@ -186,7 +206,11 @@ impl Plan {
                 .map(|(_, a)| *a)
                 .unwrap_or(KeyType::Unassigned);
             if before != after {
-                changes.push(Change { index, before, after });
+                changes.push(Change {
+                    index,
+                    before,
+                    after,
+                });
             }
         }
         Ok(Plan { changes })
@@ -216,7 +240,7 @@ mod tests {
         let mut table = KeyTable::new();
         table.set(0, KeyType::key(KeyCode::A));
         table.set(16, KeyType::media(consumer::MUTE));
-        let file = ConfigFile::from_table(&table, 0);
+        let file = ConfigFile::from_table_in_profile(&table, 0, None);
 
         let text = file.to_json().unwrap();
         let parsed = ConfigFile::parse(&text).unwrap();
@@ -236,7 +260,7 @@ mod tests {
         let mut table = KeyTable::new();
         table.set(0, KeyType::key(KeyCode::A));
         table.set(1, KeyType::Unassigned);
-        let file = ConfigFile::from_table(&table, 0);
+        let file = ConfigFile::from_table_in_profile(&table, 0, None);
         assert_eq!(file.keys.len(), 1);
         assert_eq!(file.keys[0].index, 0);
     }
@@ -245,7 +269,7 @@ mod tests {
     fn an_unrecognised_slot_is_preserved_not_dropped() {
         let mut table = KeyTable::new();
         table.unrecognised.push((5, 0x99));
-        let file = ConfigFile::from_table(&table, 0);
+        let file = ConfigFile::from_table_in_profile(&table, 0, None);
         assert_eq!(file.keys.len(), 1);
         assert_eq!(file.keys[0].unrecognised_type.as_deref(), Some("0x99"));
         assert!(file.keys[0].action.is_none());
@@ -260,7 +284,10 @@ mod tests {
             raw: Some([0x20, 0x02, 0x6D, 0x00]), // shift-f18
             unrecognised_type: None,
         };
-        assert_eq!(e.action().unwrap(), Some(KeyType::combo(Modifiers::LSHIFT, KeyCode::F18)));
+        assert_eq!(
+            e.action().unwrap(),
+            Some(KeyType::combo(Modifiers::LSHIFT, KeyCode::F18))
+        );
     }
 
     #[test]
@@ -271,7 +298,10 @@ mod tests {
             raw: None,
             unrecognised_type: None,
         };
-        assert_eq!(e.action().unwrap(), Some(KeyType::combo(Modifiers::LCTRL, KeyCode(0x06))));
+        assert_eq!(
+            e.action().unwrap(),
+            Some(KeyType::combo(Modifiers::LCTRL, KeyCode(0x06)))
+        );
     }
 
     #[test]
@@ -285,6 +315,7 @@ mod tests {
                 raw: None,
                 unrecognised_type: Some("0x99".into()),
             }],
+            profile: None,
         };
         // main.rs prints errors with {:#}, which shows the whole context chain.
         let err = format!("{:#}", file.validate().unwrap_err());
@@ -296,21 +327,41 @@ mod tests {
     fn duplicate_indices_are_rejected() {
         let a = entry(0, KeyType::key(KeyCode::A));
         let b = entry(0, KeyType::key(KeyCode(0x05))); // 'b'
-        let file = ConfigFile { device: None, layer: 0, keys: vec![a, b] };
+        let file = ConfigFile {
+            device: None,
+            layer: 0,
+            profile: None,
+            keys: vec![a, b],
+        };
         assert!(format!("{:#}", file.validate().unwrap_err()).contains("more than once"));
     }
 
     #[test]
     fn an_out_of_range_index_is_rejected() {
         let e = entry(keymap::KEY_SLOTS, KeyType::key(KeyCode::A));
-        let file = ConfigFile { device: None, layer: 0, keys: vec![e] };
+        let file = ConfigFile {
+            device: None,
+            layer: 0,
+            profile: None,
+            keys: vec![e],
+        };
         assert!(format!("{:#}", file.validate().unwrap_err()).contains("out of range"));
     }
 
     #[test]
     fn a_bad_action_is_rejected_before_anything_is_written() {
-        let e = Entry { index: 0, action: Some("key:nonexistent".into()), raw: None, unrecognised_type: None };
-        let file = ConfigFile { device: None, layer: 0, keys: vec![e] };
+        let e = Entry {
+            index: 0,
+            action: Some("key:nonexistent".into()),
+            raw: None,
+            unrecognised_type: None,
+        };
+        let file = ConfigFile {
+            device: None,
+            layer: 0,
+            profile: None,
+            keys: vec![e],
+        };
         let err = format!("{:#}", file.validate().unwrap_err());
         assert!(err.contains("nonexistent"), "unhelpful error: {err}");
     }
@@ -323,6 +374,7 @@ mod tests {
         let file = ConfigFile {
             device: None,
             layer: 0,
+            profile: None,
             keys: vec![entry(0, KeyType::key(KeyCode::F13))],
         };
         let plan = Plan::between(&file, &current).unwrap();
@@ -337,7 +389,7 @@ mod tests {
         let mut current = KeyTable::new();
         current.set(0, KeyType::key(KeyCode::SPACE));
         current.set(1, KeyType::media(consumer::MUTE));
-        let file = ConfigFile::from_table(&current, 0);
+        let file = ConfigFile::from_table_in_profile(&current, 0, None);
         assert!(Plan::between(&file, &current).unwrap().is_empty());
     }
 
@@ -350,12 +402,27 @@ mod tests {
         let file = ConfigFile {
             device: None,
             layer: 0,
+            profile: None,
             keys: vec![entry(0, KeyType::key(KeyCode::SPACE))],
         };
         let plan = Plan::between(&file, &current).unwrap();
         assert_eq!(plan.changes.len(), 1, "key 1 should be cleared");
         assert_eq!(plan.changes[0].index, 1);
         assert_eq!(plan.changes[0].after, KeyType::Unassigned);
+    }
+
+    #[test]
+    fn a_snapshot_records_the_profile_it_came_from() {
+        // Profiles hold independent tables, so a snapshot that does not say
+        // which one is ambiguous.
+        let file = ConfigFile::from_table_in_profile(&KeyTable::new(), 0, Some(3));
+        assert_eq!(file.profile, Some(3));
+        let text = file.to_json().unwrap();
+        assert!(
+            text.contains("\"profile\": 3"),
+            "profile missing from {text}"
+        );
+        assert_eq!(ConfigFile::parse(&text).unwrap().profile, Some(3));
     }
 
     #[test]

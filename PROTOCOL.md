@@ -156,7 +156,7 @@ but untested.
 | `41 <len> <off>` | read URL config | R | unverified |
 | `55 …` | firmware update / DFU | W | **untested, destructive** |
 | `5A A0` | enter IAP (bootloader) | W | **untested, destructive** |
-| `FB <profile>` | set current profile | W | unverified |
+| `FB <profile>` | set current profile (index in byte 2) | W | ✓ |
 | `FC 02 00 00 <hi> <lo>` | set auto-sleep time | W | unverified |
 
 The device reports 6 profiles but only profile 0 has been exercised.
@@ -374,6 +374,57 @@ emitted keystroke can.
 
 Always confirm by observing an emitted keystroke, not by reading the table
 back. See §7.
+
+## 5a. Profiles
+
+The pad reports 6 profiles, 0-based, selected with command `FB`.
+
+**Profiles hold independent key tables.** Switching changes which table
+`read_keys` and `write_key` act on, so `--layer` alone does not identify a slot:
+layer 0 of profile 0 and layer 0 of profile 4 are different bindings. Verified
+on hardware 2026-10-09 — profile 0 has `space`/`f18`/`f19` on keys 1-3 while
+profile 4 has `ctrl+z` on all three.
+
+### The profile index goes in byte 2, not in a payload
+
+The vendor sends `[251, index]` with **no length byte**:
+
+```js
+async setCurrentProfile(e){ await this.api.sendDeviceData(6, [251, e]) }
+```
+
+so the index lands in byte 2 — the position that carries a *length* for every
+other command. This is a live trap, hit while writing this tool:
+
+```
+06 FB 04 ...   length byte 4 read as "select profile 4"
+```
+
+A probe meant to select profile 1 sent its index as an ordinary payload with
+`length = 4`, and the firmware read **4** as the profile number. It accepted the
+command without complaint and switched the pad to profile 4, where it stayed.
+Every subsequent read then returned profile 4's table, which looked like the
+key table had been destroyed. It had not — profile 0 was intact and switching
+back restored it.
+
+This is the `DESIGN.md` §7 failure mode at its worst: a write that reports
+success, reads back plausibly, and silently means something else. `minikbconfig
+profile N` reads the device back after switching rather than trusting the reply.
+
+### The vendor app does not read the layout from the device
+
+Worth recording, since it explains why the device read path is undocumented:
+
+```js
+async getKeyboardLayout(){
+  return await l(3264)("./" + vendorId_hex + "_" + productId_hex + ".json")
+}
+```
+
+The vendor app fetches a bundled `00006d7b_0000dcfa.json` rather than issuing a
+layout read. Everything else — config, lighting, macro, key writes — goes to the
+device. So the key-table read that this tool relies on is not something the
+vendor exercises, and its framing had to be established independently.
 
 ## 6. Verification method
 
