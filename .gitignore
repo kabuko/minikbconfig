@@ -1,0 +1,11 @@
+# Rust
+/target/
+
+# Python tools
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors / OS
+*.swp
+.DS_Store
