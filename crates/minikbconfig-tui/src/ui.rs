@@ -85,6 +85,10 @@ fn footer(app: &App) -> Line<'static> {
 
     match app.status() {
         Status::Ready => hint,
+        Status::Warning(msg) => Line::from(vec![
+            Span::styled("warning: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(msg.clone()),
+        ]),
         Status::Failed(msg) => Line::from(vec![
             Span::styled("error: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(msg.clone()),

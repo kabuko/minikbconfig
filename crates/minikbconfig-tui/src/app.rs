@@ -3,8 +3,10 @@
 use std::time::{Duration, Instant};
 
 use minikbconfig_config::{describe, parse_action};
-use minikbconfig_core::emitted::Emitted;
-use minikbconfig_core::keymap::{KEY_SLOTS, KeyTable, KeyType, control_name};
+use minikbconfig_core::emitted::{Emitted, Match};
+use minikbconfig_core::keymap::{
+    KEY_SLOTS, KeyCode as HidKeyCode, KeyTable, KeyType, control_name,
+};
 use minikbconfig_hid::pad::{Pad, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
@@ -30,6 +32,8 @@ pub struct Row {
 pub enum Status {
     #[default]
     Ready,
+    /// The write worked, but something else is wrong — e.g. a stuck key.
+    Warning(String),
     Failed(String),
 }
 
@@ -238,14 +242,26 @@ impl App {
         };
         match watcher.next_press(remaining.min(Duration::from_millis(100))) {
             Ok(Some(event)) => {
-                self.status = if event.matches(action) {
-                    Status::Ready
-                } else {
-                    Status::Failed(format!(
+                // A stuck extra key is not the same fault as a wrong action:
+                // the write landed, but the pad believes something else is
+                // still held. Say which, rather than reporting a good write as
+                // a failure.
+                self.status = match event.compare(action) {
+                    Match::Exact => Status::Ready,
+                    Match::ExtraKeys(extra) => {
+                        let names: Vec<String> =
+                            extra.iter().map(|c| HidKeyCode(*c).name()).collect();
+                        Status::Warning(format!(
+                            "key[{slot}] confirmed, but the pad is also emitting {} — \
+                             that looks like a key it never released; unplug it to clear",
+                            names.join("+")
+                        ))
+                    }
+                    Match::Mismatch => Status::Failed(format!(
                         "key[{slot}] should emit {} but emitted {}",
                         describe(action),
                         event.describe()
-                    ))
+                    )),
                 };
                 self.refresh_rows();
                 self.cancel();

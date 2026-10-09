@@ -8,6 +8,25 @@
 use crate::keymap::KeyType;
 use crate::protocol::REPORT_LEN;
 
+/// How an emitted event relates to the binding that was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Match {
+    /// The pad emitted exactly what was asked for.
+    Exact,
+    /// The wanted key was emitted, but others came with it — the pad believes
+    /// they are still held. Usually a key that was never released.
+    ExtraKeys(Vec<u8>),
+    /// Something else entirely.
+    Mismatch,
+}
+
+impl Match {
+    /// True when the pad did what was asked, stuck keys notwithstanding.
+    pub fn is_match(&self) -> bool {
+        !matches!(self, Match::Mismatch)
+    }
+}
+
 /// A decoded event from one of the pad's input interfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Emitted {
@@ -127,6 +146,49 @@ impl Emitted {
         }
     }
 
+    /// Compare this event against an intended binding.
+    ///
+    /// Three outcomes rather than two, because "the pad emitted the wrong
+    /// action" and "the pad emitted the right action plus something stuck" are
+    /// different faults with different fixes.
+    pub fn compare(&self, action: KeyType) -> Match {
+        let (codes, modifiers) = match self {
+            Emitted::Key { modifiers, codes } | Emitted::NumberedKey { modifiers, codes } => {
+                (codes, *modifiers)
+            }
+            Emitted::Consumer { usage } => {
+                return match action {
+                    KeyType::Media { usage: want } if *usage == want => Match::Exact,
+                    _ => Match::Mismatch,
+                };
+            }
+            Emitted::Mouse { dx, dy, .. } => {
+                return match action {
+                    KeyType::MouseMove(want) if *dx == want.dx && *dy == want.dy => Match::Exact,
+                    _ => Match::Mismatch,
+                };
+            }
+            _ => return Match::Mismatch,
+        };
+
+        let (want_mods, want_code) = match action {
+            KeyType::Standard { modifiers, code } => (modifiers.bits(), code.0),
+            _ => return Match::Mismatch,
+        };
+        if modifiers != want_mods || !codes.contains(&want_code) {
+            return Match::Mismatch;
+        }
+        // The wanted key is present. Anything else in the array is a key the
+        // pad believes is still held, which is a real fault but not a wrong
+        // binding.
+        let extra: Vec<u8> = codes.iter().copied().filter(|c| *c != want_code).collect();
+        if extra.is_empty() {
+            Match::Exact
+        } else {
+            Match::ExtraKeys(extra)
+        }
+    }
+
     /// True if this event is what the given binding should produce.
     ///
     /// This is the last step of the verification loop in `DESIGN.md` section 7:
@@ -137,20 +199,7 @@ impl Emitted {
     /// Returns false for types this build cannot verify by observation, which
     /// is the point: a macro or wheel binding has no emission to compare.
     pub fn matches(&self, action: KeyType) -> bool {
-        match (self, action) {
-            (
-                Emitted::Key { modifiers, codes } | Emitted::NumberedKey { modifiers, codes },
-                KeyType::Standard {
-                    modifiers: want_mods,
-                    code,
-                },
-            ) => *modifiers == want_mods.bits() && codes.as_slice() == [code.0],
-            (Emitted::Consumer { usage }, KeyType::Media { usage: want }) => *usage == want,
-            (Emitted::Mouse { dx, dy, .. }, KeyType::MouseMove(want)) => {
-                *dx == want.dx && *dy == want.dy
-            }
-            _ => false,
-        }
+        self.compare(action).is_match()
     }
 
     /// True if the pad says it lit up.
@@ -370,5 +419,42 @@ mod tests {
         ] {
             assert!(!Emitted::is_observable_for(action), "{action:?}");
         }
+    }
+
+    #[test]
+    fn a_stuck_extra_key_is_distinguished_from_a_wrong_action() {
+        // Observed on hardware: the pad emitted `a` alongside f13 because an
+        // earlier macro left `a` unreleased in the boot report array. That is
+        // a different fault from emitting the wrong action, and conflating
+        // them would report a correct write as a failure.
+        let stuck = Emitted::from_boot(&[0x00, 0x00, 0x04, 0x68, 0, 0, 0, 0]);
+        let want = KeyType::key(KeyCode::F13);
+
+        assert_eq!(stuck.compare(want), Match::ExtraKeys(vec![KeyCode::A.0]));
+        // Still a match for "did it emit what we asked".
+        assert!(stuck.matches(want));
+        // But not a clean confirmation.
+        assert_ne!(stuck.compare(want), Match::Exact);
+    }
+
+    #[test]
+    fn a_wrong_key_is_still_a_mismatch_even_alongside_the_right_one() {
+        // Containment must not become so loose that anything passes.
+        let both = Emitted::from_boot(&[0x00, 0x00, 0x04, 0x68, 0, 0, 0, 0]);
+        assert_eq!(both.compare(KeyType::key(KeyCode(0x05))), Match::Mismatch);
+        assert!(!both.matches(KeyType::key(KeyCode(0x05))));
+    }
+
+    #[test]
+    fn a_single_correct_key_is_an_exact_match() {
+        let event = Emitted::from_boot(&[0x00, 0x00, 0x68, 0, 0, 0, 0, 0]);
+        assert_eq!(event.compare(KeyType::key(KeyCode::F13)), Match::Exact);
+    }
+
+    #[test]
+    fn match_helpers_agree_with_the_variants() {
+        assert!(Match::Exact.is_match());
+        assert!(Match::ExtraKeys(vec![1]).is_match());
+        assert!(!Match::Mismatch.is_match());
     }
 }
