@@ -383,7 +383,9 @@ The pad reports 6 profiles, 0-based, selected with command `FB`.
 `read_keys` and `write_key` act on, so `--layer` alone does not identify a slot:
 layer 0 of profile 0 and layer 0 of profile 4 are different bindings. Verified
 on hardware 2026-10-09 — profile 0 has `space`/`f18`/`f19` on keys 1-3 while
-profile 4 has `ctrl+z` on all three.
+profile 4 has `ctrl+z` on all three. Confirmed behaviourally as well as by
+read-back: on profile 4 the physical key emits `ctrl+z`, and back on profile 0 it
+emits `space` again.
 
 ### The profile index goes in byte 2, not in a payload
 
