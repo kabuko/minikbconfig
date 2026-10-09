@@ -30,6 +30,7 @@ COMMANDS:
     apply <FILE>         Program a configuration saved by `snapshot`
     profile [N]          Show or switch the active profile
     watch [SECONDS]      Show what the pad emits as you press it
+                         (--raw shows every report, with hex and interface)
 
 ACTIONS:
     none                    clear the slot
@@ -651,6 +652,7 @@ fn confirm(question: &str) -> anyhow::Result<bool> {
 
 fn cmd_watch(args: &[String]) -> anyhow::Result<()> {
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    let raw = args.iter().any(|a| a == "--raw" || a == "-R");
     let seconds: u64 = positional
         .first()
         .copied()
@@ -663,19 +665,38 @@ fn cmd_watch(args: &[String]) -> anyhow::Result<()> {
     let _pad = Pad::open()?;
     let watcher = pad::Watcher::open()?;
 
-    println!("listening for {seconds}s — press keys or turn the knob");
+    if raw {
+        println!("listening for {seconds}s — press keys or turn the knob (raw reports)");
+    } else {
+        println!("listening for {seconds}s — press keys or turn the knob");
+    }
     let mut seen = 0usize;
     let deadline = std::time::Instant::now() + Duration::from_secs(seconds);
     while std::time::Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        match watcher.next_press(remaining.min(Duration::from_millis(250)))? {
-            Some(event) => {
-                println!("  {}", event.describe());
-                seen += 1;
+        let slice = remaining.min(Duration::from_millis(250));
+        if raw {
+            match watcher.next_report(slice)? {
+                Some(report) => {
+                    println!("  {}", report.describe());
+                    seen += 1;
+                }
+                None => continue,
             }
-            None => continue,
+        } else {
+            match watcher.next_press(slice)? {
+                Some(event) => {
+                    println!("  {}", event.describe());
+                    seen += 1;
+                }
+                None => continue,
+            }
         }
     }
-    println!("{seen} event(s)");
+    if raw {
+        println!("{seen} report(s)");
+    } else {
+        println!("{seen} event(s)");
+    }
     Ok(())
 }

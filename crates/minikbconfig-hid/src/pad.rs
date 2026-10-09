@@ -271,6 +271,53 @@ pub fn describe(pad: &Pad) -> String {
 /// Interface 0 is matched by its numbered report descriptors, interface 1 by the
 /// boot-keyboard descriptor. Both are needed: keyboard actions come out of the
 /// boot interface on this device and consumer actions out of interface 0.
+/// One input report, with the context needed to interpret and display it.
+///
+/// Shared by both frontends: `minikbconfig watch --raw` prints these, and the
+/// TUI's event pane renders them. Keeping one type is the point — a separate
+/// formatting path per frontend is how they drift apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    /// Which interface it arrived on. Decoding depends on this: a boot report
+    /// starts with a modifier byte, while a numbered one starts with a report
+    /// ID, and guessing wrong turns a keystroke into a report nobody can name.
+    pub kind: InputKind,
+    /// The report exactly as it came off the wire.
+    pub bytes: Vec<u8>,
+    /// The decoded event.
+    pub event: Emitted,
+}
+
+impl Report {
+    /// A one-line rendering for a terminal: interface, hex, then what it means.
+    pub fn describe(&self) -> String {
+        format!(
+            "{}  {:<26} {}",
+            self.kind.label(),
+            hex(&self.bytes),
+            self.event.describe()
+        )
+    }
+}
+
+impl InputKind {
+    /// Short name for this interface, as it appears in raw output.
+    pub fn label(self) -> &'static str {
+        match self {
+            InputKind::Boot => "boot",
+            InputKind::Numbered => "report",
+        }
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct Watcher {
     interfaces: Vec<device::InputInterface>,
 }
@@ -298,6 +345,19 @@ impl Watcher {
     /// millisecond. Keyboard events come from the boot interface and consumer
     /// events from the numbered one, so starving either loses half the pad.
     pub fn next_press(&self, timeout: Duration) -> anyhow::Result<Option<Emitted>> {
+        Ok(self.next_report(timeout)?.map(|r| r.event))
+    }
+
+    /// Block until any report arrives, and return it unfiltered.
+    ///
+    /// Unlike [`Self::next_press`] this yields releases and reports the decoder
+    /// could not name, which is what makes it useful for working out what the
+    /// pad is doing when the decoded name is not enough.
+    ///
+    /// The round-robin is the same as in `next_press`, for the same reason: a
+    /// blocking read returns only on its own device, so giving one interface the
+    /// whole budget starves the others.
+    pub fn next_report(&self, timeout: Duration) -> anyhow::Result<Option<Report>> {
         let deadline = Instant::now() + timeout;
         let mut buf = [0u8; REPORT_LEN];
         loop {
@@ -317,12 +377,106 @@ impl Watcher {
                     InputKind::Boot => Emitted::from_boot(&buf[..len]),
                     InputKind::Numbered => Emitted::from_numbered(&buf[..len]),
                 };
-                if !event.is_release() {
-                    return Ok(Some(event));
-                }
+                return Ok(Some(Report {
+                    kind: interface.kind,
+                    bytes: buf[..len].to_vec(),
+                    event,
+                }));
             }
         }
     }
 }
 
 const _: () = assert!(minikbconfig_core::VENDOR_USAGE == 0x0002);
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+    use minikbconfig_core::keymap::{KeyCode, KeyType, Modifiers};
+
+    /// A boot-keyboard report is 8 bytes: modifiers, a reserved byte, then six
+    /// keycode slots. Shorter slices decode to nothing, which is worth pinning
+    /// because it looks like a working decoder silently returning empty.
+    #[test]
+    fn a_report_renders_interface_hex_and_decoding() {
+        let raw = [0x00u8, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let report = Report {
+            kind: InputKind::Boot,
+            bytes: raw.to_vec(),
+            event: Emitted::from_boot(&raw),
+        };
+        let line = report.describe();
+        assert!(line.starts_with("boot "), "names the interface: {line}");
+        assert!(line.contains("00 00 2c 00"), "shows the bytes: {line}");
+        assert!(line.contains("space"), "shows the decoding: {line}");
+
+        // A truncated report decodes to nothing rather than to a wrong key.
+        assert_eq!(Emitted::from_boot(&raw[..4]).keycode(), None);
+    }
+
+    #[test]
+    fn the_two_interfaces_are_distinguishable_in_output() {
+        // This is the whole reason a report carries its kind: a boot report
+        // starts with a modifier byte and a numbered one with a report ID, so
+        // decoding the wrong way turns a keystroke into an unnameable report.
+        let boot_raw = [0x01u8, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let boot = Report {
+            kind: InputKind::Boot,
+            bytes: boot_raw.to_vec(),
+            event: Emitted::from_boot(&boot_raw),
+        };
+        let numbered = Report {
+            kind: InputKind::Numbered,
+            bytes: vec![0x03, 0xE2, 0x00],
+            event: Emitted::from_numbered(&[0x03, 0xE2, 0x00]),
+        };
+        assert!(boot.describe().starts_with("boot "));
+        assert!(numbered.describe().starts_with("report "));
+        assert!(boot.describe().contains("ctrl+a"));
+        assert!(numbered.describe().contains("media:mute"));
+    }
+
+    #[test]
+    fn an_unnamed_report_is_still_shown_with_its_bytes() {
+        // The point of raw output: a report the decoder cannot name must still
+        // be inspectable rather than dropped.
+        let bytes = vec![0x42, 0x01, 0x02, 0x03];
+        let report = Report {
+            kind: InputKind::Numbered,
+            bytes: bytes.clone(),
+            event: Emitted::from_numbered(&bytes),
+        };
+        let line = report.describe();
+        assert!(line.contains("unknown report 66"), "names it: {line}");
+        assert!(line.contains("42 01 02 03"), "and shows the bytes: {line}");
+    }
+
+    #[test]
+    fn a_release_is_visible_in_raw_output_though_not_in_watch() {
+        // next_press filters releases; raw output must not, or a stuck key is
+        // invisible.
+        let bytes = [0x00u8; 8];
+        let report = Report {
+            kind: InputKind::Boot,
+            bytes: bytes.to_vec(),
+            event: Emitted::from_boot(&bytes),
+        };
+        assert!(report.event.is_release());
+        assert!(report.describe().contains("00 00 00 00 00 00 00 00"));
+    }
+
+    #[test]
+    fn reports_carry_their_decoded_event_so_callers_need_not_decode_again() {
+        let bytes = [0x01u8, 0x00, 0x04, 0, 0, 0, 0, 0];
+        let report = Report {
+            kind: InputKind::Boot,
+            bytes: bytes.to_vec(),
+            event: Emitted::from_boot(&bytes),
+        };
+        assert!(
+            report
+                .event
+                .matches(KeyType::combo(Modifiers::LCTRL, KeyCode::A))
+        );
+    }
+}
