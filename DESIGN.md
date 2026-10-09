@@ -46,6 +46,8 @@ node → libusb mandatory). See §6.
 
 ## 2. Wire format
 
+Full protocol reference: **[PROTOCOL.md](PROTOCOL.md)**. Summary:
+
 64-byte output report on the vendor interface. Derived from the vendor's own
 `webhid_send_command` in `www.sdcx-tech.com`:
 
