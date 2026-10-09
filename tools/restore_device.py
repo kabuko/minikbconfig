@@ -29,6 +29,15 @@ from probe_sdcx import build, find_vendor_node, read_chunk, transact  # noqa: E4
 SINGLE = 0x10
 FILLER = bytes([0x13, 0x00, 0x00, 0x00])
 
+# Factory bindings for the 3-key board (6d7b:dcfa): space, f18, f19.
+#
+# These are NOT valid for the 6-key board (0816:246f), whose keys default to
+# gui-c, f17, f18, gui-v, space, enter. Running this against the wrong board
+# overwrites good bindings with the other model's.
+#
+# Prefer a snapshot:  minikbconfig snapshot snapshots/six_key
+#                     minikbconfig apply snapshots/six_key --dry-run
+# A snapshot is taken from the actual device, so it cannot be the wrong model.
 ORIGINAL_LAYER0 = {
     0: bytes([0x20, 0x00, 0x2C, 0x00]),
     1: bytes([0x20, 0x00, 0x6D, 0x00]),
@@ -61,7 +70,9 @@ def main():
         return 1
     print(f"vendor interface: {node}\n")
 
-    print("restoring layer 0 (live):")
+    print("restoring layer 0 (live) from the 3-key board's factory bindings:")
+    print("  if this is the 6-key board (0816:246f), stop -- use a snapshot")
+    print("  via 'minikbconfig apply <file>' instead.")
     ok = True
     for index, value in sorted(ORIGINAL_LAYER0.items()):
         write_key(node, index, value, 0)

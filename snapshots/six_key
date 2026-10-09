@@ -1,0 +1,131 @@
+{
+  "device": {
+    "vendor_id": 2070,
+    "product_id": 9327,
+    "name": "SIDE-KEYBOARD"
+  },
+  "layer": 0,
+  "profile": 0,
+  "keys": [
+    {
+      "index": 0,
+      "action": "key:gui-c",
+      "raw": [
+        32,
+        8,
+        6,
+        0
+      ]
+    },
+    {
+      "index": 1,
+      "action": "key:f17",
+      "raw": [
+        32,
+        0,
+        108,
+        0
+      ]
+    },
+    {
+      "index": 2,
+      "action": "key:f18",
+      "raw": [
+        32,
+        0,
+        109,
+        0
+      ]
+    },
+    {
+      "index": 3,
+      "action": "key:gui-v",
+      "raw": [
+        32,
+        8,
+        25,
+        0
+      ]
+    },
+    {
+      "index": 4,
+      "action": "key:space",
+      "raw": [
+        32,
+        0,
+        44,
+        0
+      ]
+    },
+    {
+      "index": 5,
+      "action": "key:enter",
+      "raw": [
+        32,
+        0,
+        40,
+        0
+      ]
+    },
+    {
+      "index": 16,
+      "action": "media:mute",
+      "raw": [
+        48,
+        226,
+        0,
+        0
+      ]
+    },
+    {
+      "index": 17,
+      "action": "media:volume-up",
+      "raw": [
+        48,
+        233,
+        0,
+        0
+      ]
+    },
+    {
+      "index": 18,
+      "action": "media:volume-down",
+      "raw": [
+        48,
+        234,
+        0,
+        0
+      ]
+    },
+    {
+      "index": 19,
+      "action": "media:mute",
+      "raw": [
+        48,
+        226,
+        0,
+        0
+      ]
+    },
+    {
+      "index": 20,
+      "action": "media:volume-up",
+      "raw": [
+        48,
+        233,
+        0,
+        0
+      ]
+    },
+    {
+      "index": 21,
+      "action": "media:volume-down",
+      "raw": [
+        48,
+        234,
+        0,
+        0
+      ]
+    }
+  ]
+}
