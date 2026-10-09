@@ -37,6 +37,8 @@ pub struct Pad {
     vendor_id: u16,
     product_id: u16,
     product_name: String,
+    /// How many physical keys this model has. The device does not report it.
+    keys: u8,
 }
 
 impl Pad {
@@ -62,11 +64,19 @@ impl Pad {
 
     fn open_interface(info: &hidapi::DeviceInfo) -> anyhow::Result<Pad> {
         let handle = device::open(info)?;
+        let model = device::model_of(info).ok_or_else(|| {
+            anyhow::anyhow!(
+                "device {:04x}:{:04x} is not a known model",
+                info.vendor_id(),
+                info.product_id()
+            )
+        })?;
         Ok(Pad {
             handle,
             vendor_id: info.vendor_id(),
             product_id: info.product_id(),
             product_name: info.product_string().unwrap_or_default().to_string(),
+            keys: model.keys,
         })
     }
 
@@ -80,6 +90,16 @@ impl Pad {
 
     pub fn product_name(&self) -> &str {
         &self.product_name
+    }
+
+    /// How many physical keys this model has, occupying slots 0..keys.
+    pub fn keys(&self) -> u8 {
+        self.keys
+    }
+
+    /// Which physical control a slot index refers to on *this* model.
+    pub fn control_name(&self, index: u8) -> Option<&'static str> {
+        keymap::control_name(index, self.keys)
     }
 
     /// Send a request and wait for the matching reply, returning the payload.

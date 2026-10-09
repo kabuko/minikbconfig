@@ -85,7 +85,7 @@ impl App {
     /// Read every slot from the device, replacing what was shown.
     pub fn refresh(&mut self) -> anyhow::Result<()> {
         let table = self.pad.read_keys(0)?;
-        self.rows = build_rows(&table);
+        self.rows = build_rows(&table, self.pad.keys());
         self.status = Status::Ready;
         Ok(())
     }
@@ -334,7 +334,7 @@ impl App {
     /// Re-read after a write so the list shows the new value immediately.
     fn refresh_rows(&mut self) {
         if let Ok(table) = self.pad.read_keys(0) {
-            self.rows = build_rows(&table);
+            self.rows = build_rows(&table, self.pad.keys());
             self.clamp_selection();
         }
     }
@@ -462,11 +462,11 @@ impl RecentReports {
 }
 
 /// One row per slot, named where the slot maps to a physical control.
-fn build_rows(table: &KeyTable) -> Vec<Row> {
+fn build_rows(table: &KeyTable, keys: u8) -> Vec<Row> {
     (0..KEY_SLOTS)
         .map(|index| Row {
             index,
-            control: control_name(index).unwrap_or_default().to_string(),
+            control: control_name(index, keys).unwrap_or_default().to_string(),
             action: table.get(index).unwrap_or(KeyType::Unassigned),
         })
         .collect()
@@ -478,24 +478,35 @@ mod tests {
 
     #[test]
     fn rows_cover_every_slot_in_order() {
-        let rows = build_rows(&KeyTable::new());
+        let rows = build_rows(&KeyTable::new(), 6);
         assert_eq!(rows.len(), KEY_SLOTS as usize);
         assert_eq!(rows[0].index, 0);
         assert_eq!(rows[KEY_SLOTS as usize - 1].index, KEY_SLOTS - 1);
     }
 
     #[test]
-    fn a_slot_with_no_control_falls_back_to_its_index() {
-        let rows = build_rows(&KeyTable::new());
-        // Slot 3 is not a physical control, so it must say so rather than
-        // render as an empty cell.
-        assert_eq!(rows[3].label(), "slot 3");
-        assert_eq!(rows[0].label(), "key 1");
+    fn labels_follow_the_model_rather_than_the_slot_index() {
+        // The two boards share knob slots and differ only in key count, so the
+        // same index means different things on each.
+        let six = build_rows(&KeyTable::new(), 6);
+        assert_eq!(six[0].label(), "key 1");
+        assert_eq!(six[3].label(), "key 4");
+        assert_eq!(six[6].label(), "slot 6", "past the last key");
+        assert_eq!(six[16].label(), "knob 1 press");
+
+        let three = build_rows(&KeyTable::new(), 3);
+        assert_eq!(three[2].label(), "key 3");
+        assert_eq!(
+            three[3].label(),
+            "slot 3",
+            "a 3-key board must not claim a key 4"
+        );
+        assert_eq!(three[16].label(), "knob 1 press", "knobs are shared");
     }
 
     #[test]
     fn unassigned_slots_render_as_a_dash_not_as_an_action() {
-        let rows = build_rows(&KeyTable::new());
+        let rows = build_rows(&KeyTable::new(), 6);
         assert_eq!(rows[0].action_text(), "—");
     }
 

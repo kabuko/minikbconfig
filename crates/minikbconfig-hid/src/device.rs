@@ -31,6 +31,14 @@ pub struct InputInterface {
 }
 
 /// Open one interface for reading or writing.
+/// The model an interface belongs to, if it is one we support.
+pub fn model_of(info: &hidapi::DeviceInfo) -> Option<DeviceId> {
+    SUPPORTED
+        .iter()
+        .copied()
+        .find(|d| d.vendor_id == info.vendor_id() && d.product_id == info.product_id())
+}
+
 pub fn open(info: &hidapi::DeviceInfo) -> anyhow::Result<hidapi::HidDevice> {
     let api = hidapi::HidApi::new().context("enumerate HID devices")?;
     api.open_path(info.path())
@@ -97,11 +105,7 @@ pub fn open_input_interfaces() -> anyhow::Result<Vec<InputInterface>> {
 }
 
 fn is_supported(info: &hidapi::DeviceInfo) -> bool {
-    let id = DeviceId {
-        vendor_id: info.vendor_id(),
-        product_id: info.product_id(),
-    };
-    SUPPORTED.contains(&id)
+    model_of(info).is_some()
 }
 
 /// Record an interface unless that device path is already present.

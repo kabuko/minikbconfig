@@ -364,19 +364,30 @@ pub mod mouse {
     }
 }
 
+/// The largest number of physical keys any supported model has.
+pub const MAX_KEYS: u8 = 6;
+
 /// Which physical control a slot index refers to, if any.
 ///
-/// Slot numbering is not contiguous: 0-2 are the keys and then nothing until 16,
-/// so a bare index means little on screen. This is device knowledge rather than
-/// presentation, which is why it lives beside the key model rather than in a
-/// frontend.
+/// Slot numbering is not contiguous — the keys are 0..keys and then nothing
+/// until the knobs at 16 — so a bare index means little on screen. This is
+/// device knowledge rather than presentation, which is why it lives beside the
+/// key model rather than in a frontend.
 ///
-/// Indices 19-21 are a second knob, unused on this model but present in the
-/// table.
-pub fn control_name(index: u8) -> Option<&'static str> {
-    const KEYS: [&str; 3] = ["key 1", "key 2", "key 3"];
+/// `keys` is the model's physical key count, which the device does not report.
+/// Both boards share the knob slots; they differ only in how many keys they
+/// have, so the same 6-key board would otherwise label slots 3-5 as keys that
+/// the 3-key model does not have.
+///
+/// Indices 19-21 are a second knob, present in the table of both models but
+/// unused on the hardware so far.
+pub fn control_name(index: u8, keys: u8) -> Option<&'static str> {
+    const KEY_NAMES: [&str; MAX_KEYS as usize] =
+        ["key 1", "key 2", "key 3", "key 4", "key 5", "key 6"];
+    if index < keys.min(MAX_KEYS) {
+        return Some(KEY_NAMES[index as usize]);
+    }
     Some(match index {
-        0..=2 => KEYS[index as usize],
         16 => "knob 1 press",
         17 => "knob 1 cw",
         18 => "knob 1 ccw",
@@ -879,14 +890,34 @@ mod tests {
     #[test]
     fn control_names_cover_the_slots_that_have_controls() {
         // Slot numbering is not contiguous, which is the whole reason this
-        // table exists: indices 3-15 are not physical controls.
-        assert_eq!(control_name(0), Some("key 1"));
-        assert_eq!(control_name(2), Some("key 3"));
-        assert_eq!(control_name(16), Some("knob 1 press"));
-        assert_eq!(control_name(18), Some("knob 1 ccw"));
-        assert_eq!(control_name(21), Some("knob 2 ccw"));
-        for index in [3u8, 15, 22, 27] {
-            assert_eq!(control_name(index), None, "slot {index} has no control");
+        // table exists: indices 6-15 are not physical controls.
+        assert_eq!(control_name(0, 6), Some("key 1"));
+        assert_eq!(control_name(2, 6), Some("key 3"));
+        assert_eq!(control_name(16, 6), Some("knob 1 press"));
+        assert_eq!(control_name(18, 6), Some("knob 1 ccw"));
+        assert_eq!(control_name(21, 6), Some("knob 2 ccw"));
+        for index in [6u8, 15, 22, 27] {
+            assert_eq!(control_name(index, 6), None, "slot {index} has no control");
         }
+    }
+
+    #[test]
+    fn the_key_count_comes_from_the_model_not_the_slot_index() {
+        // Both boards use the same knob slots and differ only in key count. A
+        // 3-key model must not claim slots 3-5 are keys: labelling a key that
+        // does not exist is the same class of mistake as writing a binding that
+        // does nothing.
+        assert_eq!(control_name(5, 3), None, "a 3-key board has no key 6");
+        assert_eq!(control_name(5, 6), Some("key 6"));
+        assert_eq!(control_name(2, 3), Some("key 3"), "keys 1-3 are shared");
+        assert_eq!(
+            control_name(16, 3),
+            Some("knob 1 press"),
+            "knobs are shared"
+        );
+        // A model claiming more keys than any known model is clamped rather
+        // than indexing past the table.
+        assert_eq!(control_name(7, 200), None);
+        assert_eq!(control_name(0, 0), None);
     }
 }

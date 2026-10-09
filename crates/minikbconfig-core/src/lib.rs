@@ -43,6 +43,11 @@ pub use response::{DeviceInfo, Response};
 pub struct DeviceId {
     pub vendor_id: u16,
     pub product_id: u16,
+    /// How many physical keys the model has, which occupy slots 0..keys.
+    ///
+    /// The device does not report this, so it cannot be discovered: it has to
+    /// be known per model. Slots at or above this are not keys on that board.
+    pub keys: u8,
 }
 
 /// Every pad this build knows how to drive.
@@ -51,11 +56,13 @@ pub const SUPPORTED: &[DeviceId] = &[
     DeviceId {
         vendor_id: 0x6D7B,
         product_id: 0xDCFA,
+        keys: 3,
     },
-    // 6 keys + rotary. Same interface layout and protocol.
+    // 6 keys + rotary. Same interface layout, protocol and knob slots.
     DeviceId {
         vendor_id: 0x0816,
         product_id: 0x246F,
+        keys: 6,
     },
 ];
 
@@ -88,7 +95,8 @@ mod tests {
     fn the_original_device_is_still_supported() {
         assert!(SUPPORTED.contains(&DeviceId {
             vendor_id: VENDOR_ID,
-            product_id: PRODUCT_ID
+            product_id: PRODUCT_ID,
+            keys: 3
         }));
     }
 }
