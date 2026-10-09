@@ -5,6 +5,7 @@
 //! write took effect: reads can succeed while behaviour is unchanged.
 //! See `PROTOCOL.md` §6.
 
+use crate::keymap::KeyType;
 use crate::protocol::REPORT_LEN;
 
 /// A decoded event from one of the pad's input interfaces.
@@ -126,6 +127,43 @@ impl Emitted {
         }
     }
 
+    /// True if this event is what the given binding should produce.
+    ///
+    /// This is the last step of the verification loop in `DESIGN.md` section 7:
+    /// a write that stored correctly proves nothing, because several wrong
+    /// encodings read back perfectly while emitting nothing. Only matching the
+    /// emitted report against the intended binding is evidence.
+    ///
+    /// Returns false for types this build cannot verify by observation, which
+    /// is the point: a macro or wheel binding has no emission to compare.
+    pub fn matches(&self, action: KeyType) -> bool {
+        match (self, action) {
+            (
+                Emitted::Key { modifiers, codes } | Emitted::NumberedKey { modifiers, codes },
+                KeyType::Standard {
+                    modifiers: want_mods,
+                    code,
+                },
+            ) => *modifiers == want_mods.bits() && codes.as_slice() == [code.0],
+            (Emitted::Consumer { usage }, KeyType::Media { usage: want }) => *usage == want,
+            (Emitted::Mouse { dx, dy, .. }, KeyType::MouseMove(want)) => {
+                *dx == want.dx && *dy == want.dy
+            }
+            _ => false,
+        }
+    }
+
+    /// True if the pad says it lit up.
+    ///
+    /// The pad emits an LED notification rather than anything on the input
+    /// interfaces, so lighting cannot be confirmed this way.
+    pub fn is_observable_for(action: KeyType) -> bool {
+        matches!(
+            action,
+            KeyType::Standard { .. } | KeyType::Media { .. } | KeyType::MouseMove { .. }
+        )
+    }
+
     /// Human-readable rendering.
     pub fn describe(&self) -> String {
         match self {
@@ -180,6 +218,7 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keymap::{KeyCode, Modifiers, MouseMove};
 
     #[test]
     fn boot_report_decodes_a_keycode() {
@@ -279,5 +318,57 @@ mod tests {
         );
         let event = Emitted::from_numbered(&[0x02]);
         assert!(matches!(event, Emitted::Mouse { dx: 0, dy: 0, .. }));
+    }
+
+    #[test]
+    fn a_keystroke_matches_only_its_own_modifiers_and_code() {
+        let press = Emitted::from_boot(&[0x00, 0x00, 0x04, 0, 0, 0, 0, 0]);
+        assert!(press.matches(KeyType::key(KeyCode::A)));
+        // Wrong key.
+        assert!(!press.matches(KeyType::key(KeyCode(0x05))));
+        // Right key, wrong modifiers.
+        assert!(!press.matches(KeyType::combo(Modifiers::LCTRL, KeyCode::A)));
+        // Unassigned matches nothing at all.
+        assert!(!press.matches(KeyType::Unassigned));
+    }
+
+    #[test]
+    fn a_modifier_combination_matches_only_with_the_same_mask() {
+        let ctrl_a = Emitted::from_boot(&[0x01, 0x00, 0x04, 0, 0, 0, 0, 0]);
+        assert!(ctrl_a.matches(KeyType::combo(Modifiers::LCTRL, KeyCode::A)));
+        assert!(!ctrl_a.matches(KeyType::combo(Modifiers::LSHIFT, KeyCode::A)));
+        assert!(!ctrl_a.matches(KeyType::combo(Modifiers(0x03), KeyCode::A)));
+    }
+
+    #[test]
+    fn consumer_and_mouse_events_match_their_own_bindings() {
+        let mute = Emitted::from_numbered(&[0x03, 0xE2, 0x00]);
+        assert!(mute.matches(KeyType::media(0xE2)));
+        assert!(!mute.matches(KeyType::media(0xE9)));
+        // A consumer event is not a keystroke.
+        assert!(!mute.matches(KeyType::key(KeyCode::A)));
+
+        let move_event = Emitted::from_numbered(&[0x02, 0x00, 0x0A, 0x00, 0xFB, 0xFF, 0, 0]);
+        assert!(move_event.matches(KeyType::MouseMove(MouseMove { dx: 10, dy: -5 })));
+        assert!(!move_event.matches(KeyType::MouseMove(MouseMove { dx: 10, dy: 5 })));
+    }
+
+    #[test]
+    fn only_observable_types_can_be_verified_by_emission() {
+        assert!(Emitted::is_observable_for(KeyType::key(KeyCode::A)));
+        assert!(Emitted::is_observable_for(KeyType::media(0xE2)));
+        assert!(Emitted::is_observable_for(KeyType::MouseMove(
+            MouseMove::default()
+        )));
+        // These either do nothing or emit nothing comparable.
+        for action in [
+            KeyType::Unassigned,
+            KeyType::Macro { index: 0 },
+            KeyType::Wheel { up: true },
+            KeyType::OpenWebsite,
+            KeyType::CustomCombination,
+        ] {
+            assert!(!Emitted::is_observable_for(action), "{action:?}");
+        }
     }
 }

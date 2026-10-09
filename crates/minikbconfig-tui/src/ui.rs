@@ -1,12 +1,12 @@
 //! Drawing.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
-use ratatui::Frame;
 
-use crate::app::{App, Status};
+use crate::app::{App, Mode, Status};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -17,9 +17,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ])
     .split(area);
 
-    let header = Block::default()
-        .borders(Borders::ALL)
-        .title(" minikbconfig — layer 0 ");
+    let header = Block::default().borders(Borders::ALL).title(title(app));
     frame.render_widget(header, chunks[0]);
 
     let items: Vec<ListItem> = app
@@ -49,10 +47,23 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(footer(app), chunks[2]);
 }
 
+fn title(app: &App) -> String {
+    match app.mode() {
+        Mode::Normal => " minikbconfig — layer 0 ".to_string(),
+        Mode::Editing { input } => format!(" minikbconfig — set: {input}_ "),
+        Mode::Verifying { slot, action } => format!(
+            " minikbconfig — press key[{slot}] to confirm it emits {} ",
+            minikbconfig_config::describe(*action)
+        ),
+    }
+}
+
 fn footer(app: &App) -> Line<'static> {
     let hint = Line::from(vec![
         Span::raw("↑/↓ "),
         Span::styled("move", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw("  enter "),
+        Span::styled("set", Style::default().add_modifier(Modifier::DIM)),
         Span::raw("  r "),
         Span::styled("refresh", Style::default().add_modifier(Modifier::DIM)),
         Span::raw("  q "),
