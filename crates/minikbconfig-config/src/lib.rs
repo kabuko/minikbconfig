@@ -20,6 +20,6 @@ pub mod action;
 pub mod config;
 pub mod error;
 
-pub use action::{describe, parse_action, ParseError};
+pub use action::{ParseError, describe, parse_action};
 pub use config::{Change, ConfigFile, Device, Entry, Plan};
 pub use error::ConfigError;

@@ -271,14 +271,16 @@ mod tests {
     #[test]
     fn exactly_max_payload_still_fits() {
         let payload = vec![0u8; MAX_PAYLOAD];
-        assert!(Request::new(Command::WRITE_KEY_LAYOUT_BULK)
-            .with_payload(payload)
-            .to_report()
-            .is_ok());
+        assert!(
+            Request::new(Command::WRITE_KEY_LAYOUT_BULK)
+                .with_payload(payload)
+                .to_report()
+                .is_ok()
+        );
     }
 
     // imported late so the tests above read as protocol examples
-    use crate::keymap::{write_key, Command, KeyAction, KeyCode};
+    use crate::keymap::{Command, KeyAction, KeyCode, write_key};
 
     // Real reply captured from the pad, for a key-layout read sent as
     // `06 08 3a 00 00 00 00 00`. Note byte 1 is 0x07, not the 0x08 that was

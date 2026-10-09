@@ -12,8 +12,8 @@
 pub mod device;
 pub mod pad;
 
-pub use device::{find_config_interfaces, InputInterface, InputKind};
-pub use pad::{describe, Pad, Watcher};
+pub use device::{InputInterface, InputKind, find_config_interfaces};
+pub use pad::{Pad, Watcher, describe};
 
 /// Vendor ID for the supported device family.
 pub use minikbconfig_core::VENDOR_ID;

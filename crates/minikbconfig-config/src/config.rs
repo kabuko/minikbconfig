@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use minikbconfig_core::keymap::{self, KeyTable, KeyType, KEY_RECORD_LEN};
+use minikbconfig_core::keymap::{self, KEY_RECORD_LEN, KeyTable, KeyType};
 use serde::{Deserialize, Serialize};
 
 use crate::action::{describe, parse_action};
@@ -240,7 +240,7 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minikbconfig_core::keymap::{consumer, KeyCode, Modifiers};
+    use minikbconfig_core::keymap::{KeyCode, Modifiers, consumer};
 
     fn entry(index: u8, action: KeyType) -> Entry {
         Entry {

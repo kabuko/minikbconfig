@@ -2,7 +2,7 @@
 //!
 //! Mirrors the accepted spellings so existing configs and habits carry over.
 
-use minikbconfig_core::keymap::{self, consumer, KeyCode, KeyType, Modifiers};
+use minikbconfig_core::keymap::{self, KeyCode, KeyType, Modifiers, consumer};
 
 /// Errors from parsing an action string.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -385,7 +385,7 @@ pub fn describe(action: KeyType) -> String {
 #[cfg(test)]
 mod describe_tests {
     use super::*;
-    use minikbconfig_core::keymap::{consumer, MouseMove};
+    use minikbconfig_core::keymap::{MouseMove, consumer};
 
     #[test]
     fn describe_and_parse_round_trip_for_every_writable_type() {

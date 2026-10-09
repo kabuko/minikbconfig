@@ -10,7 +10,7 @@ use minikbconfig_core::keymap::{self, KeyTable, KeyType};
 use minikbconfig_core::light::{self, LightConfig};
 use minikbconfig_hid::pad::{self, Pad};
 
-use minikbconfig_config::{describe, parse_action, ConfigFile, Plan};
+use minikbconfig_config::{ConfigFile, Plan, describe, parse_action};
 
 const USAGE: &str = "\
 minikbconfig — configure SDCX SIDE-KEYBOARD macro pads (USB 6d7b:dcfa)

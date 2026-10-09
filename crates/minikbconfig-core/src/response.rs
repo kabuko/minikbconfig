@@ -3,7 +3,7 @@
 //! See `PROTOCOL.md` §2 and §3.
 
 use crate::protocol::{
-    ProtocolError, CONFIG_PAYLOAD_OFFSET, REPORT_LEN, RESPONSE_MARKER, RESPONSE_PAYLOAD_OFFSET,
+    CONFIG_PAYLOAD_OFFSET, ProtocolError, REPORT_LEN, RESPONSE_MARKER, RESPONSE_PAYLOAD_OFFSET,
 };
 
 /// A decoded reply from the configuration interface.

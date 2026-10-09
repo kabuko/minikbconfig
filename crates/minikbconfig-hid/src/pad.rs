@@ -6,11 +6,11 @@
 use std::time::{Duration, Instant};
 
 use minikbconfig_core::{
-    keymap::{self, Command, KeyTable, CHUNK_KEYS, KEY_SLOTS},
-    light::{self, LightConfig},
-    protocol::{is_reply_to, Request, REPORT_LEN, RESPONSE_PAYLOAD_OFFSET},
-    response::{DeviceInfo, Response},
     Emitted, PRODUCT_ID, VENDOR_ID,
+    keymap::{self, CHUNK_KEYS, Command, KEY_SLOTS, KeyTable},
+    light::{self, LightConfig},
+    protocol::{REPORT_LEN, RESPONSE_PAYLOAD_OFFSET, Request, is_reply_to},
+    response::{DeviceInfo, Response},
 };
 
 use crate::device::{self, InputKind};

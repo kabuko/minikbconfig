@@ -4,4 +4,4 @@
 # The codebase was hand-formatted at first and drifted: by the time it was
 # checked it had accumulated 77 hunks, because nothing enforced it. Run
 # `cargo fmt` before committing.
-edition = "2021"
+edition = "2024"
