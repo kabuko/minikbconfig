@@ -215,6 +215,13 @@ impl Emitted {
 
     /// Human-readable rendering.
     pub fn describe(&self) -> String {
+        // A release carries no information, but it arrives constantly -- raw
+        // output of a knob turn is roughly three releases per press. Rendering
+        // it as "media:0x0000" or as an empty string is noise that buries the
+        // presses, so it gets one word.
+        if self.is_release() {
+            return "release".to_string();
+        }
         match self {
             Emitted::Key { modifiers, codes } | Emitted::NumberedKey { modifiers, codes } => {
                 let mods = crate::keymap::Modifiers(*modifiers).to_string();
@@ -456,5 +463,29 @@ mod tests {
         assert!(Match::Exact.is_match());
         assert!(Match::ExtraKeys(vec![1]).is_match());
         assert!(!Match::Mismatch.is_match());
+    }
+
+    #[test]
+    fn releases_render_as_one_word_rather_than_as_noise() {
+        // Found by looking at real raw output: the pad emits roughly three
+        // releases for every press, so a release that renders as "media:0x0000"
+        // or as an empty string buries the presses it sits between.
+        assert_eq!(Emitted::from_boot(&[0; 8]).describe(), "release");
+        assert_eq!(
+            Emitted::from_numbered(&[0x03, 0x00, 0x00]).describe(),
+            "release"
+        );
+        assert_eq!(
+            Emitted::from_numbered(&[0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).describe(),
+            "release"
+        );
+    }
+
+    #[test]
+    fn a_release_is_still_distinguishable_from_a_press_when_filtered() {
+        // The filtered view must keep dropping releases; only the rendering
+        // changes, not is_release.
+        assert!(Emitted::from_boot(&[0; 8]).is_release());
+        assert!(!Emitted::from_boot(&[0x00, 0x00, 0x2C, 0, 0, 0, 0, 0]).is_release());
     }
 }
