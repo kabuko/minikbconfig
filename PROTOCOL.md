@@ -143,8 +143,8 @@ but untested.
 | `09 3B <off> <layer>` | write key layout (bulk) | W | ✓ |
 | `0A` | get light config | R | ✓ |
 | `0B <len> <off> …` | set light config | W | ✓ |
-| `0C <len> <off>` | get macro data | R | ✓ |
-| `0D <len> <off> …` | set macro data | W | ✓ |
+| `0C <len> <off>` | get macro data | R | ✓ (see §5b) |
+| `0D <len> <off> …` | set macro data | W | ✓ (see §5b) |
 | `0F 04` | reset macro data | W | ✓ |
 | `0F FF` | restore factory settings | W | ✓ |
 | `10 07 <idx> <layer>` | **write one key** | W | ✓ |
@@ -276,8 +276,9 @@ only in emitted HID reports, which is a different thing.
 Both types **store without error and do nothing**. Writing 96 or 112 through
 command `10` reads back correctly and emits no report at all, so read-back
 cannot detect the problem — only an emitted keystroke can. Neither is usable
-until macro data (`0C`/`0D`) or the mouse path is understood, so `minikbconfig`
-refuses `mouse:` and `delay:` actions rather than writing dead bindings.
+until the macro action encoding (§5b) is understood, `minikbconfig` refuses
+`mouse:`, `delay:` and macro bindings rather than writing keys that read back
+correctly and do nothing.
 
 ### Type 0x20 — Standard keyboard
 
@@ -427,6 +428,58 @@ The vendor app fetches a bundled `00006d7b_0000dcfa.json` rather than issuing a
 layout read. Everything else — config, lighting, macro, key writes — goes to the
 device. So the key-table read that this tool relies on is not something the
 vendor exercises, and its framing had to be established independently.
+
+## 5b. Macros
+
+The macro data area is **4096 bytes**, read with `0C` and written with `0D`:
+
+```
+bytes 0..63     16 x u16-LE offsets, one per macro M0..M15; 0xFFFF = empty
+bytes 64..4095  steps, 4 bytes each
+```
+
+Offsets and lengths use the ordinary framing (`length` in byte 2, offset in
+bytes 3-4), but **the payload is read from report byte 5, not byte 8** — the
+same quirk as the light record in §3. Measured 2026-10-09: writing a known
+4096-byte pattern with the payload at byte 8 lands it 3 bytes late at every
+offset from 0 to 2000, and with the payload at byte 5 the delta is exactly 0
+throughout.
+
+Reads return their payload at byte 8 as usual, so the two directions differ.
+The vendor writes in 59-byte chunks and reads in 56.
+
+Per the vendor's decoder, a step is:
+
+```
+bytes 0-1   delay, u16 LE
+byte  2     flags: &63 = type, bit 6 = action, bit 7 = last step
+byte  3     code
+```
+
+### What is verified, and what is not
+
+Verified on hardware 2026-10-09:
+
+- The 4096-byte area reads back exactly what was written, byte for byte.
+- A key bound to type `0x60` with `code1` = macro index **does** run that macro
+  when pressed: the pad emitted real HID input, confirmed by keystrokes
+  arriving in a live editor.
+- The vendor writes type 96 with `value2` = 1 alongside the index.
+
+**Not determined: the action encoding.** The vendor's decoder maps the type
+field 1, 2, 3, 4 to flags 3, 2, 4, 5, but that mapping does not match the
+device. A macro of eight steps, one per type-field value 0-7 all with code
+`0x04`, emitted a mouse *middle* click for every step — and `0x04` is the middle
+button in the HID mask. So bits 0-5 do not select the action the way the
+JavaScript reads, or the step layout differs from it.
+
+This is consistent with §9's note that the vendor's own `CreateMouse` passes the
+wrong type constant. The type enum in that bundle is not trustworthy.
+
+Until this is resolved, writing a macro produces a binding that stores and reads
+back perfectly while emitting the wrong thing — the same failure mode as §7, and
+the reason `minikbconfig` does not expose macros rather than shipping a feature
+that silently types the wrong key.
 
 ## 6. Verification method
 

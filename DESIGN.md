@@ -269,6 +269,10 @@ at the seat gets access without group membership.
   copied: `RSoft.MacroPad`'s `ExtendedReport.CreateMouse` passes `KeyType.Multimedia`
   (2) instead of `Mouse` (3); its bulk key write reuses the length byte for
   payload length while reads use a fixed `58`.
+- Macro storage is understood — the 4096-byte area round-trips exactly and a
+  type `0x60` binding really does run its macro — but the per-step **action
+  encoding is not**, so macros are not exposed. The vendor's type enum in its
+  JavaScript does not match the device. See `PROTOCOL.md` §5b.
 - Firmware update commands (`55`, `5A`) are mapped but **untested** — deliberately
   not exercised, as flashing is destructive and unrecoverable if interrupted.
 - The lighting commands (`0A`, `0B`, `14`, `16`) are verified working. The record
