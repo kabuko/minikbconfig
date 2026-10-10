@@ -307,8 +307,16 @@ minikbconfig led key 1 '#0000ff'      # physical key 2 turns blue
 minikbconfig led on --mode 1          # every key is green again - write is hidden
 ```
 
-Measured on the 6-key model: `led key 1 '#0000ff'` showed key 2 blue in mode 5
-and green in mode 1. Keys 1-6 all take writes.
+Measured on the 6-key model, one write at a time with nothing else in between:
+key 1 written red was red in mode 5 and green again in mode 1, and keys 1-6 all
+accept writes including index 0.
+
+Getting this wrong is easy, and it was got wrong repeatedly here. Modes 1 and 4
+hide per-key writes completely, so "the write did nothing" is the default
+observation for a write that worked perfectly. Two rounds of testing were
+discarded before one write was made and observed on its own: an earlier batch had
+probe reports landing on neighbouring keys and overwriting what had just been
+set, which made it look as though index 0 and index 1 were both broken.
 
 **`12` cannot verify anything.** It answers `aa 12 01` followed by all zeros for
 every length and offset tried, so the read shape is wrong or unimplemented —
