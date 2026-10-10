@@ -590,8 +590,8 @@ fn cmd_led_key(args: &[String]) -> anyhow::Result<()> {
     // key dark with it. So `led key` cannot confirm itself, and must not try.
     println!("  key[{index:2}] wrote {hex}");
     println!(
-        "  not confirmed: this pad has no usable colour read-back. The write is \
-         acknowledged, and command 12 would erase key 1 rather than report it."
+        "  not confirmed, and it cannot be: the protocol has no per-key colour read. \
+         Command 12 would erase key 1 rather than report it."
     );
     println!("  see it with `minikbconfig led on --mode 5`, which shows per-key colours.");
     Ok(())

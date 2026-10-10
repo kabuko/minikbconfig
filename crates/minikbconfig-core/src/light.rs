@@ -237,11 +237,15 @@ pub fn set_key_color(index: u8, rgb: [u8; 3]) -> Result<[u8; REPORT_LEN], Protoc
 
 /// Build the report that reads every key colour (command `0x12`).
 ///
-/// **Do not send this.** It is not a read. Measured on the 6-key model: a `14`
-/// write to offset 0 followed by this command leaves the key dark, while the
-/// same write with no `12` afterwards shows the colour immediately. Since the
-/// framing carries no offset, the firmware applies it at offset 0 and treats the
-/// request as a write of zeros.
+/// **Do not send this.** It is not a read, and there is no correct framing for
+/// it: the vendor app contains no per-key colour read at all — its
+/// `getKeyRGBBytes` is the generic read primitive, never called for colours.
+///
+/// Measured on the 6-key model: a `14` write to offset 0 followed by this
+/// command leaves the key dark, while the same write with no `12` afterwards
+/// shows the colour immediately. Since the framing carries no offset, the
+/// firmware applies it at offset 0, where it lands on the colour-write path and
+/// zeroes key 1.
 ///
 /// So it silently erases key 1's colour, which is why per-key colour writes to
 /// index 0 appeared to fail. The function is kept only so the probe that

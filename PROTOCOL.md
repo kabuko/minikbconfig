@@ -229,14 +229,29 @@ as percentages, each then scaled by /360 or /100 into a byte. Because value is
 Swept on the 6-key model by setting one mode at a time and watching the pad.
 Brightness, colour, speed and direction were held fixed; only the mode varied.
 
-| mode | observed |
-|---|---|
-| 1 | steady, all six keys lit |
-| 2 | slow pulse |
-| 3 | off |
-| 4 | fades between colours, **all six keys sharing one colour at a time** |
-| 5 | shows **per-key colours**; each key its own stored colour |
-| 6 | **alternating pattern**: even-numbered keys lit, odd dark |
+The vendor's per-device config (`0816_246f.json`, identical for `6d7b_dcfa`)
+names every mode and declares which parameters each one uses:
+
+| mode | name | brightness | speed | direction | colour | observed |
+|---|---|---|---|---|---|---|
+| 0 | 关闭 off | – | – | – | – | off |
+| 1 | 常亮 steady | ✓ | – | – | ✓ | steady, all keys lit |
+| 2 | 呼吸 breathe | ✓ | ✓ | – | ✓ | slow pulse |
+| 3 | 按亮 press | ✓ | ✓ | – | ✓ | dark until a key is held |
+| 4 | 潮汐 tide | ✓ | ✓ | – | ✓ | colour fade, all keys together |
+| 5 | custom | ✓ | – | – | – | **per-key colours** |
+
+**There are exactly six modes, 0-5. There is no mode 6.** Our mode 6 — an
+alternating pattern of even keys — reproduces, but the vendor never writes it,
+so it is a byte the firmware tolerates rather than a supported effect. Do not
+expose it.
+
+**`direction` is false for every mode.** No mode in the vendor config uses it,
+and the app has no control for it; the 4-way arrow selector in the UI is driven
+by a per-device `direction` flag that is absent here. So `direction` is a
+vestigial field rather than one whose effect we failed to provoke. The value
+0-3 originally documented was never justified, and the pad stores any value
+0-255 verbatim.
 
 Mode 6 lights keys 2, 4, 6 and leaves 1, 3, 5 dark, painted in the *global*
 colour rather than the stored per-key colours: with a rainbow stored in every
@@ -250,30 +265,23 @@ observation belonged to a different mode. A pattern that appeared once and then
 not at all is worth re-checking by looking at what is actually on screen; the
 mode was in fact deterministic the whole time.
 
-Unlike mode 5, mode 6 ignores stored per-key colour. The two look superficially
-similar from a distance, because a per-key table full of black shows as
-alternating darkness — which is exactly what it looked like before the rainbow
-existed.
+Mode 6 also ignores stored per-key colour, painting the global colour on even
+keys. It looks superficially like mode 5 from a distance, because a per-key
+table full of black reads as alternating darkness — which is what mode 6 was
+mistaken for before the rainbow existed.
 
 **Mode 4 is a global fade, not a per-key pattern.** All six keys show the same
 colour and fade together. `speed` *is* verifiable there — speed 1 is a slow
 fade, speed 255 visibly faster — and it is the only lighting parameter
 confirmed to affect anything beyond what is stored.
 
-**Mode 6 is static**, and that settles `direction`. It alternates fixed keys
-with no animation, so there is no phase to reverse and no motion to steer.
-Swept direction 0 through 4 on mode 6, the only mode with a spatial pattern:
-the lit keys never changed. `direction` is stored verbatim for any value and has
-**never been observed to affect anything** on this firmware.
+Mode 6 is static, and swept direction 0-4 on it changed nothing. Given the
+vendor config declares `direction: false` for every mode, that is the expected
+result rather than a failed experiment: there is no mode on which direction
+could act, so the sweep could not have succeeded.
 
-That the original `0-3` range was probably read off the vendor UI rather than
-measured — worth remembering as a caution about inherited numbers. Like mode 0
-versus the firmware's real mode range, an unenforced range in documentation is
-not evidence of one.
-
-The remaining parameter, `brightness`, was swept 0-4 and is enforced by the tool.
-Whether the dark half of mode 6 is truly dark or merely dimmer was not
-measured.
+`speed` applies only to modes 2, 3 and 4, and only mode 4 was confirmed to
+animate. `brightness` applies to modes 1-5 and is enforced 0-4 by the tool.
 
 Modes 5 and 6 can leave some keys dark, so "brightness 3" in a read-back does
 not mean every key is lit. The record describes the global configuration, not
@@ -348,10 +356,13 @@ discarded before one write was made and observed on its own: an earlier batch ha
 probe reports landing on neighbouring keys and overwriting what had just been
 set, which made it look as though index 0 and index 1 were both broken.
 
-### Command `12` is not a read. It erases key 1.
+### Command `12` has no read framing. It erases key 1.
 
-**Never send `12`.** The framing carries no offset, so the firmware applies it
-at offset 0 and treats the request as a write of zeros.
+**Never send `12`.** The vendor app contains no per-key colour *read* — the
+`getKeyRGBBytes` helper is just the generic `getDeviceData` primitive, used for
+layout and macro reads, and is never called for colours. So there is no correct
+framing to find. Our `12` request carries no offset, and the firmware applies it
+at offset 0, where it lands on the colour-write path and zeroes key 1.
 
 Proven directly, one variable at a time:
 
@@ -369,6 +380,11 @@ appeared to be an unwritable key.
 
 It also explains the symptom that pointed here: the colour flashed red and then
 went off. The write landed; the read-back killed it.
+
+Note what this is *not*: a colour read with the wrong shape. The vendor never
+reads per-key colours at all, so there is nothing to fix. `led key` cannot be
+given verification, and that is a property of the protocol rather than a gap in
+our implementation.
 
 Consequences, all now in place:
 
