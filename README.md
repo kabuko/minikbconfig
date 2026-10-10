@@ -171,6 +171,30 @@ These are measured on hardware, not assumptions — see
 - **Effect mode 6 is not a supported mode.** The firmware tolerates it and shows
   an alternating pattern, but the vendor never writes it.
 
+## What has been tested on hardware
+
+Being straight about this, since it is easy to overstate:
+
+**Verified against a real pad:**
+
+- reading and writing key bindings, both models
+- `set --verify` confirming an emitted keystroke by observation
+- snapshots and apply, including a byte-for-byte round trip
+- lighting: all six effect modes, the colour conversion across the hue wheel,
+  effect speed on modes 3 and 4, and per-key colour writes on all six keys
+- shell completion, driven end to end through the generated bash script
+
+**Not verified against hardware:**
+
+- **the TUI.** It is unit-tested, and its behaviour has been exercised manually
+  since, but no TUI change has an automated check against a real pad. Treat it
+  as the least-proven part of the tool.
+
+**Known not to work on these models**, measured rather than assumed: brightness
+has no effect, `direction` has no effect, the output does not dim, and per-key
+colour is visible only in effect mode 5. See
+[PROTOCOL.md](PROTOCOL.md) for the evidence.
+
 ## Layout
 
 | crate | |
