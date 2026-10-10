@@ -237,7 +237,7 @@ names every mode and declares which parameters each one uses:
 | 0 | 关闭 off | – | – | – | – | off |
 | 1 | 常亮 steady | ✓ | – | – | ✓ | steady, all keys lit |
 | 2 | 呼吸 breathe | ✓ | ✓ | – | ✓ | slow pulse |
-| 3 | 按亮 press | ✓ | ✓ | – | ✓ | dark until a key is held |
+| 3 | 按亮 press | ✓ | ✓ | – | ✓ | **lights on press, then fades** |
 | 4 | 潮汐 tide | ✓ | ✓ | – | ✓ | colour fade, all keys together |
 | 5 | custom | ✓ | – | – | – | **per-key colours** |
 
@@ -280,8 +280,35 @@ vendor config declares `direction: false` for every mode, that is the expected
 result rather than a failed experiment: there is no mode on which direction
 could act, so the sweep could not have succeeded.
 
-`speed` applies only to modes 2, 3 and 4, and only mode 4 was confirmed to
-animate. `brightness` applies to modes 1-5 and is enforced 0-4 by the tool.
+`brightness` applies to modes 1-5 and is enforced 0-4 by the tool.
+
+### Speed is not a rate
+
+`speed` is declared live for modes 2, 3 and 4, and confirmed on two of them. On
+mode 4 it behaves as expected: speed 1 is a slow fade, 255 much faster.
+
+**On mode 3 it does not.** Fade duration after a press:
+
+| speed | duration | smoothness |
+|---|---|---|
+| 1 | ~1s | smooth |
+| 5 | **~7s** | — |
+| 100 | ~1.5s | — |
+| 255 | ~1s | smooth |
+
+Duration **peaks at a low speed** and shortens toward both extremes. Higher speed
+does not mean faster fade, and 0 and 255 behave alike — 255 behaves exactly like
+1, which is consistent with the firmware treating the byte as *signed* so that
+255 is -1, but that reading is not confirmed.
+
+The ~7s peak at speed 5 was measured twice, roughly an hour apart, with all
+other parameters pinned. The 1s figures come from single presses and are less
+firmly established; treat them as approximate. The curve's shape is established,
+its exact values are not.
+
+So: **do not script lighting changes on the assumption that a higher speed fades
+faster.** That assumption is wrong, and wrong in a way that is invisible until
+someone sets a high speed and gets a short fade they did not ask for.
 
 Modes 5 and 6 can leave some keys dark, so "brightness 3" in a read-back does
 not mean every key is lit. The record describes the global configuration, not
