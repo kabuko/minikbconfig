@@ -739,27 +739,46 @@ the byte-2 layout is settled.
 
 Only four low-bit values are reachable: **{2, 3, 4, 5}**.
 
-### The device disagreement, and why the earlier test was invalid
+### Code semantics per type
 
-An eight-step macro, one step per raw byte-2 value 0-7 with code `0x04`, emitted
-a mouse *middle* click for every step. That result is still unexplained, but the
-test cannot support the conclusion drawn from it: **values 0, 1, 6 and 7 are
-values the vendor encoder never produces**, and the device's behaviour on them
-says nothing about the four values that matter.
+The same bundle resolves a step's code by type, and this is what explains the
+hardware result:
 
-A valid experiment writes only byte-2 values 2, 3, 4 and 5, one step each,
-with a code chosen per type — `0x04` is the middle button in the *mouse* mask,
-so using it for a keystroke step conflates the two. Expect type 1 with a
-keyboard code to emit that keystroke.
+- **type 1** — indexed into a fixed mouse table `D`. It is a **mouse button
+  mask, not a keyboard code**: `1` L, `2` R, `4` **middle**, `8` forward,
+  `16` back.
+- **type 2** — MouseMove, resolved from the per-device entry for that type.
+- **type 3** — scroll, `0xFF` for down else up.
+- **type 4** — scroll, `0xFF` for left else right.
 
-Also unresolved and worth noting: §9 records that the vendor's own `CreateMouse`
-passes the wrong type constant, so the enum elsewhere in that bundle is not
-trustworthy even though this encoder and decoder are.
+A keystroke is **not** one of these four types. Keys are bound with type
+`0x20` (Standard), which is handled by a separate path outside the macro step
+decoder.
 
-Until the device-side mapping is confirmed, writing a macro produces a binding
-that stores and reads back perfectly while emitting the wrong thing — the same
-failure mode as §7, and the reason `minikbconfig` does not expose macros rather
-than shipping a feature that silently types the wrong key.
+### The eight-step experiment was not reporting an encoder bug
+
+The earlier result — one step per raw byte-2 value 0-7, code `0x04`, every step
+emitting a mouse *middle* click — is now fully explained, and the encoder was
+never wrong.
+
+`0x04` is `D[4]` = middle button, correct for type 1. And **every byte-2 value
+that is not 2, 4 or 5 falls through to type 1**, so 0, 1, 6 and 7 all resolve as
+MouseMove-with-a-mouse-button. That is exactly what the vendor's own decoder
+does, and it matches the device byte for byte.
+
+So the device **agrees with the vendor JS**. The experiment was simply invalid:
+it used four byte-2 values the encoder cannot produce, and a code that means
+"middle mouse button" rather than a keystroke.
+
+A valid experiment writes byte-2 values 2, 3, 4 and 5 with a code appropriate
+to each type, and compares against the table above.
+
+Still outstanding: a keystroke inside a macro. Since no macro type carries a
+keyboard code, that is either a separate step type not in the decoder, or the
+vendor composes keystrokes from `CustomCombination` (type 4). Until that is
+identified, `minikbconfig` does not expose macros, because a binding that stores
+and reads back perfectly while emitting the wrong thing is the same failure mode
+as §7.
 
 ## 6. Verification method
 
