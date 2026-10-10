@@ -51,12 +51,14 @@ LED OPTIONS (for `led on`):
 
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
-    -V, --verify            With `set`: wait for the keypress and check the
-                            pad emits the new action
+    --verify                With `set`: wait for the keypress and check the
+                            pad emits the new action. Also spelled -V here,
+                            but only with `set`: on its own -V prints the
+                            version, so `minikbconfig -V` never reaches it.
     -n, --dry-run           With `apply`: show the diff without writing
     -y, --yes               With `apply`: skip the confirmation prompt
     -h, --help              Show this help
-    -V, --version           Show version
+    --version               Show version (also -V or `version`)
 
 EXAMPLES:
     minikbconfig info
@@ -140,6 +142,19 @@ const FLAGS: &[&str] = &[
     "-y",
     "--raw",
     "-R",
+    "--verify",
+    "-V",
+    // `led on` options. Same failure as --verify: parsed in cmd_led, listed in
+    // the help text, and never admitted here, so every one of them was refused.
+    "--brightness",
+    "-b",
+    "--mode",
+    "-m",
+    "--color",
+    "--colour",
+    "-c",
+    "--speed",
+    "--direction",
 ];
 
 /// Reject any flag we do not recognise, rather than ignoring it.
@@ -836,5 +851,50 @@ mod flag_tests {
         assert!(check_flags(&["pad.json".into(), "0".into()]).is_ok());
         assert!(check_flags(&["-".into()]).is_ok());
         assert!(check_flags(&["--nope".into()]).is_err());
+        // --verify is the flag this test exists for. It was implemented,
+        // documented and tested in isolation, and rejected by check_flags on
+        // every use, because the implementation reading a flag and the
+        // allowlist admitting it are two separate lists.
+        assert!(check_flags(&["--verify".into()]).is_ok());
+        assert!(check_flags(&["-V".into()]).is_ok());
+    }
+
+    #[test]
+    fn every_flag_in_the_help_text_is_accepted() {
+        // The generic form of the bug above: a flag documented in USAGE but
+        // missing from FLAGS fails at runtime, for anyone, forever.
+        for line in USAGE.lines() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with('-') {
+                continue;
+            }
+            for token in trimmed.split_whitespace() {
+                if !token.starts_with("--") {
+                    continue; // short forms are grouped with the long one
+                }
+                let name = token.trim_end_matches(',');
+                assert!(
+                    FLAGS.contains(&name),
+                    "help documents {name} but check_flags would reject it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_flag_check_accepts_is_documented() {
+        // The other direction: an allowlisted flag nobody can discover.
+        for flag in FLAGS {
+            if USAGE.contains(flag) {
+                continue;
+            }
+            // Short forms may be documented only in the summary line above
+            // them, so accept an undocumented short form only if the long one
+            // it pairs with is present.
+            assert!(
+                USAGE.contains(flag.trim_start_matches('-')),
+                "{flag} is accepted but never mentioned in help"
+            );
+        }
     }
 }
