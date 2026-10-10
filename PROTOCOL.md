@@ -403,6 +403,39 @@ Measured on the 6-key, holding all other parameters fixed:
 more from 32 up, so a divide by that quotient — or a table indexed by it — would
 fail in exactly this range. Not verified; we cannot see the firmware.
 
+**Reachable from the vendor's own UI**, which explains why it ships. The
+brightness slider does not use the brightness byte at all — it scales the colour
+value instead:
+
+```js
+// brightness slider: onChange keeps state, onChangeEnd commits through w()
+w = e => ({ ..., brightness: e, v: 0 == e ? 0 : Math.floor(P.v / 100 * 255 / 4 * e) })
+```
+
+So `value = value * brightness / 4`, applied client-side. That is why byte 3
+looks inert: **the app never relies on it either.** Our finding was not "the
+firmware ignores brightness" but "the firmware ignores it, the vendor works
+around it, and we had not".
+
+The consequence is that the vendor's own slider reaches the sub-32 range:
+
+| colour V | raw | brightness 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| 100% | 255 | 63 | 127 | 191 | 255 |
+| 50% | 128 | 32 | 64 | 96 | 128 |
+| 25% | 64 | **16** | 32 | 48 | 64 |
+| 12% | 31 | **7** | **15** | **23** | **31** |
+
+A muted colour at brightness 1-3 falls below 32 and hits the threshold. So this
+is a defect their own UI can trigger, not one only reachable by a raw API.
+
+**We deliberately do not copy the scaling.** It would make our brightness control
+work, but it would put our stored bytes out of step with a pad configured in the
+vendor app, and it would introduce a path into the very bug above — scaling a
+25% colour at brightness 1 yields value 16. An inert control we label `(no
+effect)` misleads nobody; one that works but can leave the pad stuck lit is worse.
+The vendor app is a working path to dimming for anyone who needs it.
+
 Mode 1 is steady and cannot exhibit either symptom, so it was never a useful
 discriminator — an earlier test of "is mode 1 stuck" was meaningless.
 

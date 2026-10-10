@@ -162,8 +162,10 @@ These are measured on hardware, not assumptions — see
 - **Brightness comes from the colour, not the brightness byte.** The light
   record stores **HSV**, and its `value` — which is `max(r,g,b)` — is the actual
   dimming control: 0 is off, 0-255 is the brightness range. The separate
-  `brightness` byte does nothing. Note per-key colour is stored as **raw RGB**,
-  not HSV.
+  `brightness` byte does nothing on these models. The vendor app implements
+  brightness by scaling the value byte client-side; we report the byte rather
+  than copy that, since it would put our stored state out of step with a pad
+  configured in their app. Note per-key colour is stored as **raw RGB**, not HSV.
 - **`direction` has no effect.** It is stored and echoed, and appears unused by
   the firmware.
 - **Very dark colours are below the display threshold.** An HSV `value` below 32
