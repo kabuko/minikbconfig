@@ -373,42 +373,53 @@ stick-lit bug cannot be triggered by a per-key write**, because it keys off the
 HSV value and per-key has no HSV. Binding the colour per-key and using mode 5
 is a workaround for a dark colour.
 
-### Firmware bug: mode 3 sticks lit below value 32
+### Value below 32 is below the display threshold, and mode 3 gets it wrong
 
-On mode 3, a colour with `value` in **1..=31 leaves the LED lit and never fades
-out**. The press still registers — the key does something visible — but the fade
-never completes and the pad stays on.
+There is a threshold at **value 32** (`0x20`). Below it the colour is treated as
+too dim to display. Mode 3 mishandles that.
 
-Measured on the 6-key model, mode 3, holding all other parameters fixed:
+Measured on the 6-key, holding all other parameters fixed:
 
-| value | colour | behaviour |
-|---|---|---|
-| 0 | `#000000` | dark; nothing to light |
-| 1 | `#010000` | **sticks lit** |
-| 24 | `#180000` | **sticks lit** |
-| 31 | `#1f0000` | **sticks lit** |
-| 32 | `#200000` | fades normally |
-| 255 | `#ffffff` | fades normally |
+| value | colour | mode 2 (breathe) | mode 3 (press) |
+|---|---|---|---|
+| 0 | `#000000` | dark | dark |
+| 1 | `#010000` | dark | **sticks lit** |
+| 24 | `#180000` | dark | **sticks lit** |
+| 31 | `#1f0000` | dark | **sticks lit** |
+| 32 | `#200000` | breathes normally | fades normally |
+| 255 | `#ffffff` | breathes normally | fades normally |
 
-A clean boundary at 32, which is `0x20`. **Inference, not observed:** `value >> 3`
-is 0 for every value below 32 and 1 or more from 32 up, so a firmware divide by
-that quotient — or a table indexed by it — would fail in exactly this range. Not
-verified; we cannot see the firmware.
+**Two separate findings, and they should not be conflated.**
 
-This only appears in modes that fade. Mode 1 is steady and behaves normally at
-value 31, so it cannot exhibit the symptom — an earlier test of "is mode 1 stuck"
-was meaningless.
+1. **The threshold itself is arguably correct** — a very dark colour not lighting
+   is defensible. Mode 2 shows nothing below 32 and nothing is wrong.
+
+2. **Mode 3's behaviour is a genuine bug.** It turns on a colour the firmware
+   otherwise considers too dim to display, and then never fades it out. The press
+   registers, the LED comes on, and the pad stays that way. Mode 3 should show
+   nothing below 32, exactly as mode 2 does.
+
+**Inference, not observed:** `value >> 3` is 0 for every value below 32 and 1 or
+more from 32 up, so a divide by that quotient — or a table indexed by it — would
+fail in exactly this range. Not verified; we cannot see the firmware.
+
+Mode 1 is steady and cannot exhibit either symptom, so it was never a useful
+discriminator — an earlier test of "is mode 1 stuck" was meaningless.
 
 **Silent, with no diagnostic.** The pad gives no indication anything is wrong,
 and the vendor app would not show one either. A user who picks a dark colour
 gets a pad that stays on and cannot be corrected from the UI.
 
 `led` warns before writing this combination rather than refusing, since the pad
-does accept the record and the colour is fine for every other mode.
+does accept the record and the colour is legitimate for every other mode.
 
-Not yet established: whether mode 2 (breathe, also a fading mode) is affected,
-and whether the vendor's own colour picker can select a value below 32 at all.
-If it cannot, this would explain why it ships.
+**Workaround:** bind the colour per-key and use mode 5. Per-key writes are raw
+RGB and do not pass through HSV, so they cannot hit the threshold — and mode 5
+displays them.
+
+Still not established: whether the vendor's own colour picker can select a value
+below 32 at all. If it cannot, nobody upstream would ever hit this, which would
+explain why it ships.
 
 ### Speed is not a rate
 

@@ -166,9 +166,11 @@ These are measured on hardware, not assumptions — see
   not HSV.
 - **`direction` has no effect.** It is stored and echoed, and appears unused by
   the firmware.
-- **Mode 3 sticks lit for dark colours.** An HSV `value` of 1-31 leaves the LED
-  on and never fades. 32 and above are fine, and no other mode is affected.
-  Nothing on the pad indicates a problem; `led` warns before writing it.
+- **Very dark colours are below the display threshold.** An HSV `value` below 32
+  does not light the pad — defensible behaviour, and what mode 2 does correctly.
+  **Mode 3 gets it wrong:** it turns on such a colour and then never fades it, so
+  the pad stays lit. `led` warns before writing that combination. Workaround:
+  bind the colour per-key and use mode 5, which bypasses HSV entirely.
 - **Per-key colour is only visible in effect mode 5.** In modes 1-4 every key is
   painted with the global colour, so a per-key write lands and is invisible.
 - **Per-key colour cannot be verified.** There is no read for it; command `12`
