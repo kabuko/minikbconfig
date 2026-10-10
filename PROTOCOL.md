@@ -249,9 +249,13 @@ judged on mode 4. `speed` *is* verifiable there — speed 1 is a slow fade,
 speed 255 visibly faster — and is the only lighting parameter confirmed to
 affect anything beyond what is stored.
 
-Modes 5 and 6 leave some keys dark, so "brightness 3" in a read-back does not
-mean every key is lit. The record describes the global configuration, not the
-per-key result; the tool has no way to read which keys are dark.
+Modes 5 and 6 can leave some keys dark, so "brightness 3" in a read-back does
+not mean every key is lit. The record describes the global configuration, not
+the per-key result, and the tool has no way to read which keys are dark.
+
+**Mode 5 is the only mode that displays stored per-key colours**, and it is the
+only way to see a `14` write land. See the per-key colour section below — this
+is the single most important thing to know when testing lighting by eye.
 
 ### Colour is verified across the wheel
 
