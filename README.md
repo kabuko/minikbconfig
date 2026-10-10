@@ -257,6 +257,9 @@ colour is visible only in effect mode 5. See
 | `minikbconfig` | the CLI |
 | `minikbconfig-tui` | the TUI |
 
+[CHANGELOG.md](CHANGELOG.md) records what is in each release, including the
+findings that changed the implementation.
+
 [DESIGN.md](DESIGN.md) covers why it is built this way.
 [PROTOCOL.md](PROTOCOL.md) is the reverse-engineered reference, with hardware
 measurements and the traps that cost real time.
