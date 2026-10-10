@@ -282,6 +282,21 @@ could act, so the sweep could not have succeeded.
 
 `brightness` applies to modes 1-5 and is enforced 0-4 by the tool.
 
+### Brightness: inert *on this model*, not necessarily in the protocol
+
+The vendor's light panel exposes brightness and speed as two identical 0-4
+sliders, and writes both raw. So brightness is a real part of the protocol and
+of the product's design — the absence of an effect here is a property of **the
+LEDs fitted to this model**, not of the wire format.
+
+That distinction matters for two reasons. A different pad may well honour it, and
+`minikbconfig` supports more than one. And a hardware limitation is not a reason
+to stop writing the byte: keeping it means our state stays byte-compatible with
+a pad configured in the vendor app, so the two tools do not fight.
+
+So the byte is written and the control is kept. What follows is a measurement on
+the 6-key model, not a verdict on the protocol.
+
 ### Brightness has no observable effect
 
 The vendor's light panel declares `light-setting min: 0, max: 4`, written raw
