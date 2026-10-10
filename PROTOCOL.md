@@ -236,11 +236,24 @@ Brightness, colour, speed and direction were held fixed; only the mode varied.
 | 3 | off |
 | 4 | fades between colours, **all six keys sharing one colour at a time** |
 | 5 | shows **per-key colours**; each key its own stored colour |
-| 6 | not reproducible — one run showed keys 2/4/6 lit, a second showed all six |
+| 6 | **alternating pattern**: even-numbered keys lit, odd dark |
 
-Mode 6 did not reproduce with identical settings, so it is not a stored
-per-key state or a deterministic mode effect. Treat a single observation of an
-unusual pattern as a transition artefact, not a protocol feature.
+Mode 6 lights keys 2, 4, 6 and leaves 1, 3, 5 dark, painted in the *global*
+colour rather than the stored per-key colours: with a rainbow stored in every
+key it still showed green, and followed a global colour change to magenta. It
+reproduces reliably.
+
+It was recorded here as "not reproducible" for a while, on the strength of a
+second run that showed all six keys lit. That second run was taken while the pad
+was displaying mode 1 — the question was asked after switching modes, so the
+observation belonged to a different mode. A pattern that appeared once and then
+not at all is worth re-checking by looking at what is actually on screen; the
+mode was in fact deterministic the whole time.
+
+Unlike mode 5, mode 6 ignores stored per-key colour. The two look superficially
+similar from a distance, because a per-key table full of black shows as
+alternating darkness — which is exactly what it looked like before the rainbow
+existed.
 
 **Mode 4 is a global fade, not a per-key pattern.** All six keys show the same
 colour and fade together. That matters for `direction`: with no spatial
