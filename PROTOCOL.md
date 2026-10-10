@@ -235,7 +235,7 @@ Brightness, colour, speed and direction were held fixed; only the mode varied.
 | 2 | slow pulse |
 | 3 | off |
 | 4 | fades between colours, **all six keys sharing one colour at a time** |
-| 5 | steady, most keys off |
+| 5 | shows **per-key colours**; each key its own stored colour |
 | 6 | not reproducible — one run showed keys 2/4/6 lit, a second showed all six |
 
 Mode 6 did not reproduce with identical settings, so it is not a stored
@@ -293,17 +293,34 @@ Per-key colours are written with `14`, offset **`3 * key_index`** and length
 byte **3**, because colours are stored one RGB triple per key. A bare index
 offset writes to the wrong key.
 
-**Per-key colour has not been observed to work.** `14` is acknowledged, but
-neither model showed any visible change, measured by setting the global colour
-first and then writing a per-key colour on top: the pad kept the global colour
-throughout. `12`, the documented read counterpart, answers `aa 12 01` followed
-by all zeros for every length and offset tried, so there is no way to confirm a
-write either. `led key` therefore reports what it can prove and says plainly
-that it cannot confirm the rest.
+**Per-key colour works, but only effect mode 5 reveals it.** `14` writes
+correctly at `3 * index` for every key including index 0 — there is no special
+case for the first key. The trap is that modes 1 and 4 paint every key with the
+*global* colour and hide the per-key data completely. A write can land
+perfectly and look like nothing happened.
 
-Do not assume `14` works because it returned success. The acknowledgement is
-the same one the firmware sends for records it discards — see the mode range
-above — so an acknowledgement is not evidence that anything was stored.
+So a per-key colour write must be checked in mode 5:
+
+```
+minikbconfig led on --mode 5          # reveals per-key colours
+minikbconfig led key 1 '#0000ff'      # physical key 2 turns blue
+minikbconfig led on --mode 1          # every key is green again - write is hidden
+```
+
+Measured on the 6-key model: `led key 1 '#0000ff'` showed key 2 blue in mode 5
+and green in mode 1. Keys 1-6 all take writes.
+
+**`12` cannot verify anything.** It answers `aa 12 01` followed by all zeros for
+every length and offset tried, so the read shape is wrong or unimplemented —
+not that the write failed. `led key` reports that honestly rather than
+pretending to confirm.
+
+The wrong conclusion, recorded because it is easy to repeat: testing a per-key
+write in a global-display mode, seeing no change, and concluding the feature is
+inert. The write was acknowledged correctly the whole time. Do not treat
+`14`'s acknowledgement as proof — it is the same one the firmware sends for
+records it discards, see the mode range above — but equally, do not treat the
+*absence* of a visible change in mode 1 as proof it failed. Check mode 5.
 
 Verified on hardware 2026-10-09: `minikbconfig led on --color '#00ccff'` lit
 the pad cyan at brightness 4, mode 2, and `led off` returned it to dark.

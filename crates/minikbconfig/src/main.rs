@@ -584,27 +584,30 @@ fn cmd_led_key(args: &[String]) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     pad.set_key_color(index, rgb)?;
 
-    // The `14` acknowledgement is worthless on its own: the firmware sends it
-    // for records it discards, the same way a mode-0 write is acknowledged and
-    // then vanishes. So confirm against `12` where possible, and say plainly
-    // when confirmation was not available rather than claiming success.
+    // Command 12 answers `aa 12 01` followed by zeros on every firmware tried,
+    // so it cannot confirm anything. The write is nonetheless real - see the
+    // note below - so this reports what is known and stops pretending to verify.
     match pad.key_colors() {
         Ok(table) => match table.iter().find(|(i, _)| *i == index) {
             Some((_, stored)) if *stored == rgb => {
                 println!("  key[{index:2}] colour set to {hex}");
                 println!("  confirmed: the pad reports it back");
             }
+            Some((_, [0, 0, 0])) => println!(
+                "  key[{index:2}] wrote {hex}; command 12 reports black, which is what it \
+                 always reports and carries no information"
+            ),
             Some((_, stored)) => println!(
-                "  key[{index:2}] wrote {hex}, but the pad reports #{:02x}{:02x}{:02x} there",
+                "  key[{index:2}] wrote {hex}; command 12 reports #{:02x}{:02x}{:02x} there",
                 stored[0], stored[1], stored[2]
             ),
-            None => println!("  key[{index:2}] wrote {hex}; the pad returned no colour for it"),
+            None => println!("  key[{index:2}] wrote {hex}; command 12 returned no entry"),
         },
         Err(err) => println!("  key[{index:2}] wrote {hex}; could not read it back: {err:#}"),
     }
     println!(
-        "  note: per-key colour has not been observed to take effect on either model \
-         tested. The write is acknowledged, which is not proof it landed."
+        "  note: per-key colour is real, but only visible in effect mode 5. Modes 1 and 4 \
+         paint every key with the global colour and hide it. Set `led on --mode 5` to see it."
     );
     Ok(())
 }
