@@ -51,6 +51,8 @@ LED OPTIONS (for `led on`):
 
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
+    --json                 With `info`, `dump`, `keys`, `led`: emit JSON on
+                            stdout instead of prose, for scripting
     --verify                With `set`: wait for the keypress and check the
                             pad emits the new action
     -n, --dry-run           With `apply`: show the diff without writing
@@ -122,13 +124,13 @@ fn run() -> anyhow::Result<()> {
     let layer = parse_layer_flag(rest)?;
 
     match command.as_str() {
-        "info" => cmd_info(layer),
-        "dump" => cmd_dump(layer),
-        "keys" | "keys-list" => cmd_keys(),
+        "info" => cmd_info(layer, json_flag(rest)),
+        "dump" => cmd_dump(layer, json_flag(rest)),
+        "keys" | "keys-list" => cmd_keys(json_flag(rest)),
         "set" => cmd_set(rest, layer),
         "led" => match rest.first().map(String::as_str) {
             Some("key") => cmd_led_key(&rest[1..]),
-            _ => cmd_led(rest),
+            _ => cmd_led(rest, json_flag(rest)),
         },
         "snapshot" => cmd_snapshot(rest, layer),
         "apply" => cmd_apply(rest),
@@ -166,14 +168,15 @@ const LAYER_FLAGS: &[&str] = &["-l", "--layer"];
 /// a surprise at runtime. `check_flags` reads this table, so a flag has to be
 /// added in one place to be accepted and one place to be read.
 const COMMAND_FLAGS: &[(&str, &[&str])] = &[
-    ("info", &[]),
-    ("dump", &[]),
-    ("keys", &[]),
-    ("keys-list", &[]),
+    ("info", &["--json"]),
+    ("dump", &["--json"]),
+    ("keys", &["--json"]),
+    ("keys-list", &["--json"]),
     ("set", &["--verify"]),
     (
         "led",
         &[
+            "--json",
             "--brightness",
             "-b",
             "--mode",
@@ -191,6 +194,194 @@ const COMMAND_FLAGS: &[(&str, &[&str])] = &[
     ("watch", &["--raw", "-R"]),
     ("completions", &[]),
 ];
+
+/// Consumer-page names, in one place.
+///
+/// Shared by the prose and JSON paths: these were written out twice when the
+/// JSON output was added, which is exactly how they drift.
+const MEDIA_NAMES: &[(u16, &str)] = &[
+    (keymap::consumer::PLAY_PAUSE, "play/pause"),
+    (keymap::consumer::NEXT, "next"),
+    (keymap::consumer::PREVIOUS, "previous"),
+    (keymap::consumer::STOP, "stop"),
+    (keymap::consumer::MUTE, "mute"),
+    (keymap::consumer::VOLUME_UP, "volume-up"),
+    (keymap::consumer::VOLUME_DOWN, "volume-down"),
+    (keymap::consumer::BRIGHTNESS_UP, "brightness-up"),
+    (keymap::consumer::BRIGHTNESS_DOWN, "brightness-down"),
+];
+
+// --- JSON output ---------------------------------------------------------
+//
+// Scripts should not have to parse English prose, and `snapshot` already has a
+// JSON form that was going unused for reading. Field names are snake_case and
+// match the prose where possible, so `jq` and friends work without surprises.
+
+#[derive(serde::Serialize)]
+struct InfoJson {
+    vendor_id: u16,
+    product_id: u16,
+    product_name: String,
+    firmware: String,
+    protocol: String,
+    battery_percent: u8,
+    charging: bool,
+    profile_count: u8,
+    current_profile: u8,
+    layer_count: u8,
+    current_layer: u8,
+    /// Layer actually read, which is not the same as the device's current
+    /// layer: the device counts from 1 and `--layer` counts from 0.
+    read_layer: u8,
+    keys: u8,
+    bindings: Vec<Binding>,
+}
+
+#[derive(serde::Serialize)]
+struct Binding {
+    index: u8,
+    /// `null` for a slot this build cannot decode, rather than omitting it -
+    /// a missing slot would read as "cleared", which it is not.
+    action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unrecognised_type: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct KeysJson {
+    standard: Vec<Name>,
+    media: Vec<Name>,
+    /// Action prefixes the grammar accepts.
+    kinds: Vec<&'static str>,
+    modifiers: Vec<&'static str>,
+}
+
+#[derive(serde::Serialize)]
+struct Name {
+    code: u32,
+    name: String,
+}
+
+#[derive(serde::Serialize)]
+struct LightJson {
+    /// Which of the record's fields actually affect the LEDs. Present because
+    /// `brightness` and `direction` are stored and echoed but do nothing on
+    /// these models, and a script should not have to rediscover that.
+    notes: Vec<&'static str>,
+    mode: u8,
+    /// Inert on these models.
+    brightness: u8,
+    speed: u8,
+    /// Inert on these models.
+    direction: u8,
+    cycle: u8,
+    hue: u8,
+    saturation: u8,
+    value: u8,
+    colour_is_black: bool,
+}
+
+fn bindings_of(table: &KeyTable) -> Vec<Binding> {
+    let mut out: Vec<Binding> = Vec::new();
+    for index in 0..keymap::KEY_SLOTS {
+        let Some(action) = table.get(index) else {
+            continue;
+        };
+        if action == KeyType::Unassigned {
+            continue;
+        }
+        out.push(Binding {
+            index,
+            action: Some(describe(action)),
+            unrecognised_type: None,
+        });
+    }
+    for (index, ty) in &table.unrecognised {
+        out.push(Binding {
+            index: *index,
+            action: None,
+            unrecognised_type: Some(format!("0x{ty:02x}")),
+        });
+    }
+    out.sort_by_key(|b| b.index);
+    out
+}
+
+fn light_json(c: &LightConfig) -> LightJson {
+    let mut notes = vec![
+        "brightness is stored and echoed but has no effect on this model",
+        "direction is stored and echoed but has no effect on this model",
+        "value is the real brightness control; it is max(r,g,b)",
+        "speed is 0-4 as the vendor app offers it",
+    ];
+    if c.mode == 3 && !c.colour_is_black() && c.value < 32 {
+        notes.push("mode 3 with value below 32 leaves the LED stuck lit (firmware bug)");
+    }
+    LightJson {
+        notes,
+        mode: c.mode,
+        brightness: c.brightness,
+        speed: c.speed,
+        direction: c.direction,
+        cycle: c.cycle,
+        hue: c.hue,
+        saturation: c.saturation,
+        value: c.value,
+        colour_is_black: c.colour_is_black(),
+    }
+}
+
+fn info_json(
+    pad: &Pad,
+    info: &minikbconfig_core::response::DeviceInfo,
+    layer: u8,
+    table: &KeyTable,
+) -> InfoJson {
+    InfoJson {
+        vendor_id: pad.vendor_id(),
+        product_id: pad.product_id(),
+        product_name: pad.product_name().to_string(),
+        firmware: format!(
+            "{}.{:03}",
+            info.firmware_version >> 8,
+            info.firmware_version & 0xFF
+        ),
+        protocol: format!(
+            "{}.{:03}",
+            info.protocol_version >> 8,
+            info.protocol_version & 0xFF
+        ),
+        battery_percent: info.battery_percent,
+        charging: info.charge_state != 0,
+        profile_count: info.profile_count,
+        current_profile: info.current_profile,
+        layer_count: info.layer_count,
+        current_layer: info.current_layer,
+        read_layer: layer,
+        keys: pad.keys(),
+        bindings: bindings_of(table),
+    }
+}
+
+/// Whether `--json` was requested.
+fn json_flag(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--json")
+}
+
+/// Print a value as pretty JSON, or fail rather than print nothing.
+///
+/// Failing matters: a script that parses stdout would otherwise see an empty
+/// result and treat it as "no keys" rather than "the command broke".
+/// Whether `--json` was given alongside something that would change the pad.
+pub fn led_json_conflicts(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--json") && args.len() > 1
+}
+
+fn emit_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
+    let text = serde_json::to_string_pretty(value).context("could not render JSON output")?;
+    println!("{text}");
+    Ok(())
+}
 
 /// A one-line usage hint for one command.
 fn usage_for(command: &str) -> String {
@@ -290,9 +481,14 @@ fn parse_layer_flag(args: &[String]) -> anyhow::Result<u8> {
     Ok(layer)
 }
 
-fn cmd_info(layer: u8) -> anyhow::Result<()> {
+fn cmd_info(layer: u8, json: bool) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     let info = pad.device_info()?;
+    let table = pad.read_keys(layer)?;
+
+    if json {
+        return emit_json(&info_json(&pad, &info, layer, &table));
+    }
 
     println!("{}", pad::describe(&pad));
     println!(
@@ -313,15 +509,22 @@ fn cmd_info(layer: u8) -> anyhow::Result<()> {
         info.profile_count, info.current_profile, info.layer_count, info.current_layer
     );
     println!("\n  reading layer {layer}:\n");
-
-    let table = pad.read_keys(layer)?;
     print_table(&table);
     Ok(())
 }
 
-fn cmd_dump(layer: u8) -> anyhow::Result<()> {
+fn cmd_dump(layer: u8, json: bool) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     let table = pad.read_keys(layer)?;
+    if json {
+        // The same shape `snapshot` writes, minus the device block, so a script
+        // can consume one form.
+        return emit_json(&serde_json::json!({
+            "layer": layer,
+            "keys": pad.keys(),
+            "bindings": bindings_of(&table),
+        }));
+    }
     print_table(&table);
     Ok(())
 }
@@ -343,7 +546,28 @@ fn print_table(table: &KeyTable) {
     }
 }
 
-fn cmd_keys() -> anyhow::Result<()> {
+fn cmd_keys(json: bool) -> anyhow::Result<()> {
+    if json {
+        let mut media = Vec::new();
+        for (usage, name) in MEDIA_NAMES {
+            media.push(Name {
+                code: u32::from(*usage),
+                name: name.to_string(),
+            });
+        }
+        return emit_json(&KeysJson {
+            standard: keymap::KeyCode::all()
+                .map(|c| Name {
+                    code: u32::from(c.0),
+                    name: c.name(),
+                })
+                .collect(),
+            media,
+            kinds: vec!["none", "key:", "media:", "move:"],
+            modifiers: keymap::MODIFIER_NAMES.to_vec(),
+        });
+    }
+
     println!("Key names (HID usage IDs):");
     let codes: Vec<keymap::KeyCode> = keymap::KeyCode::all().collect();
     for (i, code) in codes.iter().enumerate() {
@@ -360,17 +584,7 @@ fn cmd_keys() -> anyhow::Result<()> {
     }
 
     println!("\nMedia names (Consumer page usages):");
-    for (usage, name) in [
-        (keymap::consumer::PLAY_PAUSE, "play/pause"),
-        (keymap::consumer::NEXT, "next"),
-        (keymap::consumer::PREVIOUS, "previous"),
-        (keymap::consumer::STOP, "stop"),
-        (keymap::consumer::MUTE, "mute"),
-        (keymap::consumer::VOLUME_UP, "volume-up"),
-        (keymap::consumer::VOLUME_DOWN, "volume-down"),
-        (keymap::consumer::BRIGHTNESS_UP, "brightness-up"),
-        (keymap::consumer::BRIGHTNESS_DOWN, "brightness-down"),
-    ] {
+    for (usage, name) in MEDIA_NAMES {
         println!("  {name:<16} 0x{usage:04x}");
     }
 
@@ -501,10 +715,20 @@ fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
 /// With no arguments this reports the current state. Otherwise it patches the
 /// fields named by flags and writes the whole record back, which is what the
 /// vendor's own `setLightEffectConfig` does: read, patch, write.
-fn cmd_led(args: &[String]) -> anyhow::Result<()> {
+fn cmd_led(args: &[String], json: bool) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     let mut config = pad.light_config()?;
     let before = config;
+
+    // `--json` is the read-only form. Refuse to combine it with a write rather
+    // than silently ignoring the other flags, because `led --json --mode 2`
+    // reporting mode 2 would be a lie.
+    if json {
+        if led_json_conflicts(args) {
+            anyhow::bail!("--json reports the current state; it cannot be combined with a change");
+        }
+        return emit_json(&light_json(&before));
+    }
 
     let mut brightness = None;
     let mut mode = None;
@@ -1136,6 +1360,44 @@ mod flag_tests {
         assert!(check_flags("watch", &flags(&["--yes"])).is_err());
         assert!(check_flags("set", &flags(&["--verify"])).is_ok());
         assert!(check_flags("watch", &flags(&["--raw"])).is_ok());
+    }
+
+    #[test]
+    fn json_is_offered_exactly_where_it_is_implemented() {
+        // The whole point of the per-command table is that a flag is accepted
+        // only where it is read. `--json` is implemented on the four read-only
+        // commands and must not be accepted anywhere else, or it becomes the
+        // silent-ignore bug again.
+        let with_json: Vec<&str> = COMMAND_FLAGS
+            .iter()
+            .filter(|(_, flags)| flags.contains(&"--json"))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(with_json, ["info", "dump", "keys", "keys-list", "led"]);
+
+        for (command, flags) in COMMAND_FLAGS {
+            if matches!(*command, "info" | "dump" | "keys" | "keys-list" | "led") {
+                assert!(flags.contains(&"--json"), "{command} should take --json");
+            } else {
+                assert!(
+                    !flags.contains(&"--json"),
+                    "--json is accepted by {command} but not implemented there"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn led_json_is_refused_alongside_a_change() {
+        // `led --json --mode 2` reporting the current state while the flag asked
+        // for a change would be a lie. Refuse rather than ignore.
+        let err = led_json_conflicts(&["--json".to_string(), "--mode".to_string()]);
+        assert!(err, "a change alongside --json must be refused");
+        assert!(!led_json_conflicts(&["--json".to_string()]));
+        assert!(!led_json_conflicts(&[
+            "--mode".to_string(),
+            "2".to_string()
+        ]));
     }
 
     #[test]

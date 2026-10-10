@@ -131,6 +131,43 @@ minikbconfig apply pad.json
 Lighting is captured and restored too. Per-key colours are not, because the
 protocol has no read for them.
 
+## Scripting
+
+The read-only commands take `--json`, so nothing has to parse English prose:
+
+```sh
+minikbconfig info --json                  # device, firmware, battery, bindings
+minikbconfig dump --json                  # the key map
+minikbconfig keys --json                  # every supported name and code
+minikbconfig led --json                   # lighting state, with caveats
+```
+
+```sh
+# battery level
+minikbconfig info --json | jq .battery_percent
+
+# what is bound to key 2
+minikbconfig dump --json | jq -r '.bindings[] | select(.index == 2) | .action'
+
+# every media name the grammar accepts
+minikbconfig keys --json | jq -r '.media[].name'
+```
+
+`dump --json` emits the same shape `snapshot` writes, minus the device block, so
+one parser handles both.
+
+Two details worth knowing:
+
+- A slot this build cannot decode appears as `{"index": n, "action": null,
+  "unrecognised_type": "0x..."}` rather than being omitted — a missing slot
+  would read as "cleared", which it is not.
+- `led --json` carries a `notes` array, because `brightness` and `direction` are
+  stored and echoed but do nothing on these models, and a script should not have
+  to rediscover that. It also warns about the mode 3 stick-lit range.
+
+`--json` is refused on commands that would write, rather than accepted and
+ignored.
+
 ## Shell completion
 
 ```sh
