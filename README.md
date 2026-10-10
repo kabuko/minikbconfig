@@ -94,6 +94,10 @@ minikbconfig set 1 key:ctrl-c --verify
 waits for you to press the key and reports what the pad actually emitted. This
 is the difference between "the device accepted it" and "it works".
 
+`--verify` has no short form. `-V` means version everywhere, as it does for
+cargo and git — it used to double as a short form for this flag, so one letter
+meant two different things depending on where it appeared.
+
 ## The TUI
 
 ```sh

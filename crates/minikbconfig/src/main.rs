@@ -52,13 +52,11 @@ LED OPTIONS (for `led on`):
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
     --verify                With `set`: wait for the keypress and check the
-                            pad emits the new action. Also spelled -V here,
-                            but only with `set`: on its own -V prints the
-                            version, so `minikbconfig -V` never reaches it.
+                            pad emits the new action
     -n, --dry-run           With `apply`: show the diff without writing
     -y, --yes               With `apply`: skip the confirmation prompt
     -h, --help              Show this help
-    --version               Show version (also -V or `version`)
+    -V, --version           Show version
 
 EXAMPLES:
     minikbconfig info
@@ -101,7 +99,13 @@ fn run() -> anyhow::Result<()> {
         print!("{USAGE}");
         return Ok(());
     }
-    if matches!(args[0].as_str(), "-V" | "--version" | "version") {
+    // -V means version wherever it appears, as it does for cargo, git and
+    // docker. It used to double as a short form for `set --verify`, which gave
+    // one letter two meanings depending on position - the worst kind of flag.
+    if args
+        .iter()
+        .any(|a| matches!(a.as_str(), "-V" | "--version" | "version"))
+    {
         println!("minikbconfig {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
@@ -166,7 +170,7 @@ const COMMAND_FLAGS: &[(&str, &[&str])] = &[
     ("dump", &[]),
     ("keys", &[]),
     ("keys-list", &[]),
-    ("set", &["--verify", "-V"]),
+    ("set", &["--verify"]),
     (
         "led",
         &[
@@ -444,7 +448,7 @@ fn cmd_completions(rest: &[String]) -> anyhow::Result<()> {
 }
 
 fn cmd_set(args: &[String], layer: u8) -> anyhow::Result<()> {
-    let verify = args.iter().any(|a| a == "--verify" || a == "-V");
+    let verify = args.iter().any(|a| a == "--verify");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
     let index: u8 = positional
         .first()
@@ -1132,6 +1136,25 @@ mod flag_tests {
         assert!(check_flags("watch", &flags(&["--yes"])).is_err());
         assert!(check_flags("set", &flags(&["--verify"])).is_ok());
         assert!(check_flags("watch", &flags(&["--raw"])).is_ok());
+    }
+
+    #[test]
+    fn minus_v_means_version_everywhere_and_never_verify() {
+        // -V used to be both the version flag and a short form for
+        // `set --verify`, so its meaning depended on where it appeared. It is
+        // version everywhere now, matching cargo, git and docker.
+        assert!(GLOBAL_FLAGS.contains(&"-V"));
+        assert!(GLOBAL_FLAGS.contains(&"--version"));
+        for (command, flags) in COMMAND_FLAGS {
+            assert!(
+                !flags.contains(&"-V"),
+                "-V is a global version flag, not a `{command}` option"
+            );
+        }
+        // `set` still has exactly one way to ask for verification.
+        let set_flags = COMMAND_FLAGS.iter().find(|(n, _)| *n == "set").unwrap().1;
+        assert!(set_flags.contains(&"--verify"));
+        assert_eq!(set_flags.len(), 1);
     }
 
     #[test]
