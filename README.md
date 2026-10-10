@@ -163,6 +163,8 @@ These are measured on hardware, not assumptions — see
   off and the 0-255 range is the actual dimming control.
 - **`direction` has no effect.** It is stored and echoed, and appears unused by
   the firmware.
+- **Mode 3 sticks lit for dark colours.** A `value` of 1-31 leaves the LED on
+  and never fades. 32 and above are fine. Nothing on the pad indicates a problem.
 - **Per-key colour is only visible in effect mode 5.** In modes 1-4 every key is
   painted with the global colour, so a per-key write lands and is invisible.
 - **Per-key colour cannot be verified.** There is no read for it; command `12`

@@ -334,6 +334,40 @@ brightness 0. It is now `colour_is_black()`, which consults `value` only and is
 explicitly documented as a prediction about the stored record rather than an
 observation of the device.
 
+### Firmware bug: mode 3 sticks lit below value 32
+
+On mode 3, a colour with `value` in **1..=31 leaves the LED lit and never fades
+out**. The press still registers — the key does something visible — but the fade
+never completes and the pad stays on.
+
+Measured on the 6-key model, mode 3, holding all other parameters fixed:
+
+| value | colour | behaviour |
+|---|---|---|
+| 0 | `#000000` | dark; nothing to light |
+| 1 | `#010000` | **sticks lit** |
+| 24 | `#180000` | **sticks lit** |
+| 31 | `#1f0000` | **sticks lit** |
+| 32 | `#200000` | fades normally |
+| 255 | `#ffffff` | fades normally |
+
+A clean boundary at 32, which is `0x20`. **Inference, not observed:** `value >> 3`
+is 0 for every value below 32 and 1 or more from 32 up, so a firmware divide by
+that quotient — or a table indexed by it — would fail in exactly this range. Not
+verified; we cannot see the firmware.
+
+This only appears in modes that fade. Mode 1 is steady and behaves normally at
+value 31, so it cannot exhibit the symptom — an earlier test of "is mode 1 stuck"
+was meaningless.
+
+**Silent, with no diagnostic.** The pad gives no indication anything is wrong,
+and the vendor app would not show one either. A user who picks a dark colour
+gets a pad that stays on and cannot be corrected from the UI.
+
+Not yet established: whether mode 2 (breathe, also a fading mode) is affected,
+and whether the vendor's own colour picker can select a value below 32 at all.
+If it cannot, this would explain why it ships.
+
 ### Speed is not a rate
 
 `speed` is declared live for modes 2, 3 and 4, and confirmed on two of them. On
