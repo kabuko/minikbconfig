@@ -222,6 +222,30 @@ These are measured on hardware, not assumptions — see
 - **Effect mode 6 is not a supported mode.** The firmware tolerates it and shows
   an alternating pattern, but the vendor never writes it.
 
+## Running the hardware tests
+
+```sh
+MINIKBDEVICE_TEST=1 cargo test -p minikbconfig-hid --test hardware -- --ignored
+```
+
+They are `#[ignore]`d, so `cargo test` stays green without a pad and reports
+them as ignored rather than as passing having run nothing. The pad's bindings are
+captured before each test and restored afterwards, including on panic.
+
+Four things are checked:
+
+- every command PROTOCOL.md documents as answering, does answer
+- the URL commands are *still* silent — if they start replying, the docs and
+  `url:` support both need revisiting
+- key bindings round-trip through write and read
+- the light record round-trips, which is what catches a mode the firmware
+  silently discards
+
+What they cannot check is whether the pad is *visibly* lit. The protocol has no
+lighting read-back, so mode 3 sticking on, brightness being inert and per-key
+colour being invisible outside mode 5 are all findings that came from a person
+looking at the pad, and none of them would fail here.
+
 ## What has been tested on hardware
 
 Being straight about this, since it is easy to overstate:
