@@ -751,9 +751,20 @@ hardware result:
 - **type 3** — scroll, `0xFF` for down else up.
 - **type 4** — scroll, `0xFF` for left else right.
 
-A keystroke is **not** one of these four types. Keys are bound with type
-`0x20` (Standard), which is handled by a separate path outside the macro step
-decoder.
+A keystroke is **not** one of these four types. The vendor's key table confirms
+it: every entry has `type` 32 (`0x20`, Standard), 48 (`0x30`) or 19
+(`0x13`, DISKEY), never 1-4. A keystroke's code lives in `value2` — entry
+`K42` is `type 32, value2 50`, and 50 is HID code for `2`.
+
+So **keys and macros are separate mechanisms**, and macro steps cannot carry a
+keystroke at all:
+- a key is one 4-byte record, `type` + `code1..3`
+- a macro is a 4-byte-step list where step types are mouse/scroll only
+
+That is the whole remaining gap, and it is a design fact rather than a decoding
+failure: a macro that types text would have to store keystrokes somewhere this
+decoder does not describe. The vendor's own `CreateMouse` passing a wrong type
+constant (§9) suggests its macro editor is not fully coherent either.
 
 ### The eight-step experiment was not reporting an encoder bug
 
@@ -773,12 +784,14 @@ it used four byte-2 values the encoder cannot produce, and a code that means
 A valid experiment writes byte-2 values 2, 3, 4 and 5 with a code appropriate
 to each type, and compares against the table above.
 
-Still outstanding: a keystroke inside a macro. Since no macro type carries a
-keyboard code, that is either a separate step type not in the decoder, or the
-vendor composes keystrokes from `CustomCombination` (type 4). Until that is
-identified, `minikbconfig` does not expose macros, because a binding that stores
-and reads back perfectly while emitting the wrong thing is the same failure mode
-as §7.
+**Still outstanding, and now understood as a design fact rather than a decoding
+failure:** a macro step cannot express a keystroke. The vendor's key table has no
+entry with type 1-4, so keystrokes and macros are disjoint mechanisms.
+
+`minikbconfig` therefore does not expose macros. It could support mouse and
+scroll macros today, but a macro feature that cannot type a key would be
+confusing, and the binding itself (type `0x60`, `code1` = index) is a documented
+but otherwise unexplored path.
 
 ## 6. Verification method
 
