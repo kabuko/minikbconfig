@@ -22,5 +22,5 @@ pub mod config;
 pub mod error;
 
 pub use action::{ParseError, describe, parse_action};
-pub use config::{Change, ConfigFile, Device, Entry, Plan};
+pub use config::{Change, ConfigFile, Device, Entry, Lighting, Plan};
 pub use error::ConfigError;

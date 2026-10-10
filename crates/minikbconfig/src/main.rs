@@ -12,7 +12,7 @@ use minikbconfig_hid::pad::{self, Pad};
 
 mod shell;
 
-use minikbconfig_config::{ConfigFile, Plan, describe, parse_action};
+use minikbconfig_config::{ConfigFile, Lighting, Plan, describe, parse_action};
 
 const USAGE: &str = "\
 minikbconfig — configure SDCX SIDE-KEYBOARD macro pads (USB 6d7b:dcfa)
@@ -693,6 +693,13 @@ fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {
         name: pad.product_name().to_string(),
     });
 
+    // Lighting is part of the pad's configuration, so a snapshot that omitted it
+    // would not describe the pad. Only the global record: the protocol has no
+    // read for per-key colours, so those cannot be captured.
+    file.light = Some(minikbconfig_config::Lighting::from_core(
+        pad.light_config()?,
+    ));
+
     std::fs::write(path, file.to_json()?).with_context(|| format!("could not write {path}"))?;
     println!(
         "wrote {path} ({} keys on layer {layer}, profile {})",
@@ -791,9 +798,31 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
     let plan = Plan::between(&file, &current)?;
 
     println!("  applying {path} to layer {layer}:");
+
+    // Lighting is applied separately from the keymap, and reported separately so
+    // a lighting write cannot hide inside a keymap diff.
+    let light_change = match file.light {
+        Some(wanted) => {
+            let stored = Lighting::from_core(pad.light_config()?);
+            let diff = wanted.differences(stored);
+            if diff.is_empty() {
+                println!("    lighting: already matches");
+            } else {
+                println!("    lighting: change {} ", diff.join(", "));
+            }
+            Some((wanted, diff))
+        }
+        None => {
+            println!("    lighting: not in file, left alone");
+            None
+        }
+    };
+
     if plan.is_empty() {
-        println!("    no changes");
-        return Ok(());
+        if light_change.as_ref().is_some_and(|(_, d)| d.is_empty()) {
+            println!("    no changes");
+            return Ok(());
+        }
     }
 
     // Every change is shown before any is written, including the slots the file
@@ -807,14 +836,28 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
         );
     }
 
+    let light_edits = usize::from(
+        light_change
+            .as_ref()
+            .is_some_and(|(_, diff)| !diff.is_empty()),
+    );
     if dry_run {
         println!(
-            "\n  {} change(s); not applied (--dry-run)",
-            plan.changes.len()
+            "\n  {} key change(s), {} lighting change(s); not applied (--dry-run)",
+            plan.changes.len(),
+            light_edits
         );
         return Ok(());
     }
-    if !assume_yes && !confirm(&format!("apply {} change(s)?", plan.changes.len()))? {
+    // The prompt counts lighting too, so the confirmation reflects everything
+    // that is about to be written rather than only the keymap.
+    if !assume_yes
+        && !confirm(&format!(
+            "apply {} key change(s) and {} lighting change(s)?",
+            plan.changes.len(),
+            light_edits
+        ))?
+    {
         println!("  aborted; nothing was written");
         return Ok(());
     }
@@ -839,7 +882,28 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
         applied += 1;
     }
 
-    println!("\n  applied and verified {applied} change(s)");
+    // Lighting last, and verified against the device rather than assumed. The
+    // firmware silently discards a light record with a mode outside 1-6, so a
+    // write that returns success can still have done nothing.
+    let mut light_applied = 0usize;
+    if let Some((wanted, diff)) = light_change {
+        if !diff.is_empty() {
+            let stored = pad.set_light_config(wanted.to_core())?;
+            let back = Lighting::from_core(stored);
+            let after = wanted.differences(back);
+            if !after.is_empty() {
+                anyhow::bail!(
+                    "lighting did not take effect: still differs in {}",
+                    after.join(", ")
+                );
+            }
+            light_applied = 1;
+        }
+    }
+
+    println!(
+        "\n  applied and verified {applied} key change(s), {light_applied} lighting change(s)"
+    );
     Ok(())
 }
 

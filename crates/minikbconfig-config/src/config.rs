@@ -25,6 +25,81 @@ pub struct Device {
     pub name: String,
 }
 
+/// The pad's global lighting, as stored in the 11-byte light record.
+///
+/// A serialisable mirror of `minikbconfig_core::light::LightConfig`, which
+/// carries no serde on purpose - the protocol crate must not inherit a
+/// serialisation stack for a file format only one side needs.
+///
+/// Per-key colours are **not** here: the protocol has no read for them, so a
+/// snapshot cannot capture them. See PROTOCOL.md - command `12` is not a read
+/// and erases key 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lighting {
+    /// Effect mode, 1-6. Mode 0 is rejected by the firmware.
+    pub mode: u8,
+    /// 0-4, where 0 is off.
+    pub brightness: u8,
+    pub speed: u8,
+    pub direction: u8,
+    pub cycle: u8,
+    /// Hue, 0-255. The device stores degrees scaled by /360.
+    pub hue: u8,
+    pub saturation: u8,
+    pub value: u8,
+}
+
+impl Lighting {
+    /// Capture the global lighting record read from a pad.
+    pub fn from_core(c: minikbconfig_core::light::LightConfig) -> Lighting {
+        Lighting {
+            mode: c.mode,
+            brightness: c.brightness,
+            speed: c.speed,
+            direction: c.direction,
+            cycle: c.cycle,
+            hue: c.hue,
+            saturation: c.saturation,
+            value: c.value,
+        }
+    }
+
+    /// The core record this describes, for writing back.
+    pub fn to_core(self) -> minikbconfig_core::light::LightConfig {
+        minikbconfig_core::light::LightConfig {
+            light_type: 1,
+            mode: self.mode,
+            brightness: self.brightness,
+            speed: self.speed,
+            direction: self.direction,
+            cycle: self.cycle,
+            single_color_index: 0,
+            hue: self.hue,
+            saturation: self.saturation,
+            value: self.value,
+        }
+    }
+
+    /// Which fields differ from what the pad currently reports.
+    pub fn differences(self, stored: Lighting) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        let mut check = |name: &'static str, a: u8, b: u8| {
+            if a != b {
+                out.push(name);
+            }
+        };
+        check("mode", self.mode, stored.mode);
+        check("brightness", self.brightness, stored.brightness);
+        check("speed", self.speed, stored.speed);
+        check("direction", self.direction, stored.direction);
+        check("cycle", self.cycle, stored.cycle);
+        check("hue", self.hue, stored.hue);
+        check("saturation", self.saturation, stored.saturation);
+        check("value", self.value, stored.value);
+        out
+    }
+}
+
 /// One key slot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
@@ -51,6 +126,13 @@ pub struct ConfigFile {
     /// tables, so a snapshot without this is ambiguous.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<u8>,
+    /// Global lighting, captured by `snapshot` and restored by `apply`.
+    ///
+    /// Optional so files written before this field existed keep working: they
+    /// describe a keymap only, and applying one leaves lighting alone rather
+    /// than switching it off because the file said nothing about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<Lighting>,
     pub keys: Vec<Entry>,
 }
 
@@ -90,6 +172,7 @@ impl ConfigFile {
             device: None,
             layer,
             profile,
+            light: None,
             keys,
         }
     }
@@ -323,6 +406,7 @@ mod tests {
     #[test]
     fn an_unrestorable_slot_is_rejected_with_a_clear_error() {
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             keys: vec![Entry {
@@ -344,6 +428,7 @@ mod tests {
         let a = entry(0, KeyType::key(KeyCode::A));
         let b = entry(0, KeyType::key(KeyCode(0x05))); // 'b'
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             profile: None,
@@ -356,6 +441,7 @@ mod tests {
     fn an_out_of_range_index_is_rejected() {
         let e = entry(keymap::KEY_SLOTS, KeyType::key(KeyCode::A));
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             profile: None,
@@ -373,6 +459,7 @@ mod tests {
             unrecognised_type: None,
         };
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             profile: None,
@@ -388,6 +475,7 @@ mod tests {
         current.set(0, KeyType::key(KeyCode::SPACE));
 
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             profile: None,
@@ -416,6 +504,7 @@ mod tests {
         current.set(1, KeyType::key(KeyCode::F18));
         // The file only mentions key 0.
         let file = ConfigFile {
+            light: None,
             device: None,
             layer: 0,
             profile: None,
