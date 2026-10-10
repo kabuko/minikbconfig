@@ -290,14 +290,22 @@ mode 4 it behaves as expected: speed 1 is a slow fade, 255 much faster.
 **On mode 3 it controls the fade after release.** The mode is lit **for as long
 as the key is held**, at every speed; only the fade that follows release varies.
 
-Measured by holding ~3s, then timing the fade after letting go:
+Speed is a five-position control in the vendor's UI (`min: 0, max: 4`, same as
+brightness), and it behaves as the slider implies: **higher means a faster fade
+after release, with 4 effectively instant.** Measured by holding ~3s and timing
+the fade after letting go:
 
-| speed | while held | fade after release |
+| speed | intended | measured fade after release |
 |---|---|---|
-| 1 | lit | ~1s |
-| 2 | lit | ~1s |
-| 3 | lit | fast, under a second |
-| 4 | lit | immediate — too fast to see |
+| 1 | slow | ~1s |
+| 2 | medium | ~1s — not distinguishable from 1 |
+| 3 | fast | clearly fast, under a second |
+| 4 | immediate | immediate, too fast to see |
+
+The ordering is confirmed from 3 upward and is monotonic. **1 and 2 were not
+separated by measurement** — both read as roughly a second, so the difference
+between them is below what was resolved here. Treat the 1-to-2 step as the
+documented intent rather than something verified on this pad.
 
 Speed 4 does not "have no fade". It fades in less time than the eye resolves,
 which is why earlier readings described it as lit only while held.
