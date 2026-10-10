@@ -250,6 +250,11 @@ impl Pad {
         Ok(light::parse_key_colors(&reply, self.keys))
     }
 
+    /// Raw exchange, for probing protocol areas this crate does not yet decode.
+    pub fn raw_exchange(&self, report: &[u8], command: u8) -> anyhow::Result<Vec<u8>> {
+        self.exchange_bytes(report, command)
+    }
+
     /// Send a pre-built report and return the reply.
     ///
     /// The light commands do not fit the generic [`Request`] builder: their

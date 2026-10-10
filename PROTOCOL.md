@@ -768,6 +768,26 @@ substitution cipher over a 62-symbol alphabet: each character becomes one byte,
 
 Writes step by 59 bytes, reads by 56.
 
+**Not implemented on either model we support.** Measured on the 6-key:
+
+- `0x40` gives no reply on any framing tried — payload at byte 5 and byte 8,
+  lengths 3, 19 and 59.
+- `0x41` gives no reply either.
+- The control commands (`0x0A` for lighting, and the key-table reads) reply
+  normally moments later, so the interface and reply path are fine.
+
+A key bound to OpenWebsite stores and reads back correctly, and pressing it
+does nothing: no browser, no device response.
+
+Both per-device configs (`0816_246f` and `6d7b_dcfa`, identical schema, same
+`mcu_type` 951) declare **no URL capability at all**, and the vendor UI gates
+features on those config flags. So the firmware was never built to answer these
+commands, which is why the write is silent rather than merely unacknowledged.
+
+The codec below is therefore shared library code covering the vendor's whole
+product line, not a description of these pads. Its defects are real but describe
+a path neither model executes.
+
 ### Alphabet
 
 The table maps each character to a byte. Several characters deliberately share a
@@ -804,9 +824,26 @@ that byte to `/`. So a query string is silently rewritten: `www.a.co/x?y=1`
 round-trips to `www.a.co/x/y=1`. Combined with case folding, any URL needing
 distinct `?` or uppercase cannot survive a round trip.
 
-This is the vendor's bug, not ours — reproducing the codec exactly reproduces
-both. Worth knowing before offering `url:` bindings, since a bound key would open
-a subtly different address than the one configured.
+Reproducing the codec exactly reproduces both.
+
+**Re-verified against the JavaScript, and it is worse than first recorded.** The
+inverse map is built with `a[f[e]] = e`, and the table lists digits *before*
+their punctuation twins — so the later entry wins. Byte 30 is `1` on the way in
+and `!` on the way out:
+
+| you type | you get back |
+|---|---|
+| `https://example.com` | `https://example.com` |
+| `http://192.168.1.5:8080/` | `http://...:/` |
+| `www.a.co/x?y=1` | `www.a.co/x/y=` |
+| `https://ex.com/a1b2` | `https://ex.com/ab` |
+
+**Every digit `0`-`9` decodes to punctuation `)!@#$%^&*(`.** So no URL containing
+a digit survives a round trip, which is nearly all of them. Characters with no
+byte at all — `~`, `{`, `}`, `|` — are dropped by the encoder silently.
+
+This is moot for our models, since they never run the code. It matters only if a
+future pad implements the commands, which is why it is recorded.
 
 The bound key is type `0x80` (OpenWebsite) with all three code bytes zero; the
 URL itself lives only in this 128-byte area.

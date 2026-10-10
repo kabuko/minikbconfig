@@ -82,9 +82,10 @@ Findings that shaped the implementation:
   mouse and scroll actions — keystrokes are a separate mechanism, confirmed
   against the vendor's own key table. A macro editor that cannot type would
   mislead.
-- **URL bindings.** Also decoded, as a 62-symbol substitution cipher. The
-  vendor's codec loses case and rewrites `?` to `/`, so a bound key would open a
-  different address than configured.
+- **URL bindings.** The commands `40`/`41` are not implemented on either
+  supported model — they give no reply at all, while other config commands reply
+  normally. A key bound to OpenWebsite stores and does nothing. Neither per-device
+  config declares a URL capability, so the vendor UI never offers it either.
 - **Firmware update and bootloader entry** (`55`, `5A`). Present in the
   protocol, untested and destructive, never exposed.
 
