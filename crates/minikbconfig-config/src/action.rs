@@ -11,8 +11,8 @@ pub enum ParseError {
     MissingKind,
     #[error("unknown action kind '{kind}'; expected key, media, move or none")]
     UnknownKind { kind: String },
-    #[error("could not parse key name '{name}'; try a name like 'f13', 'space' or '0x6d'")]
-    BadKey { name: String },
+    #[error("could not parse key name '{name}'{}", format_nearby_keys(nearby))]
+    BadKey { name: String, nearby: Vec<String> },
     #[error("could not parse media key '{name}'; try 'volume-up', 'mute', 'play/pause' or '0xe9'")]
     BadMedia { name: String },
     #[error(
@@ -89,11 +89,35 @@ pub fn parse_action(input: &str) -> Result<KeyType, ParseError> {
     }
 }
 
+fn format_nearby_keys(nearby: &[String]) -> String {
+    if nearby.is_empty() {
+        "; try a name like 'f13', 'space' or '0x6d'".to_string()
+    } else {
+        format!("; did you mean: {}?", nearby.join(", "))
+    }
+}
+
+fn nearby_key_names(name: &str) -> Vec<String> {
+    let lower = name.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return Vec::new();
+    }
+    let mut matches: Vec<String> = KeyCode::all()
+        .map(|c| c.name())
+        .filter(|n| n.starts_with(&lower) || (lower.len() >= 2 && n.contains(&lower)))
+        .collect();
+    matches.sort();
+    matches.dedup();
+    matches.truncate(5);
+    matches
+}
+
 fn parse_key(rest: &str) -> Result<KeyType, ParseError> {
     // Split trailing modifier tokens from the final key name: "ctrl-shift-f13".
     let (mods, key) = split_modifiers(rest);
     let code = KeyCode::parse(key).ok_or_else(|| ParseError::BadKey {
         name: key.to_string(),
+        nearby: nearby_key_names(key),
     })?;
     Ok(KeyType::Standard {
         modifiers: mods,
@@ -392,15 +416,40 @@ mod describe_tests {
         // The claim in describe's doc comment, as a test: whatever the CLI
         // prints for a slot must parse back to the same binding, so a TUI can
         // display and re-apply without a second grammar.
-        let cases = [
-            KeyType::key(KeyCode::A),
-            KeyType::combo(Modifiers(0x03), KeyCode::F13),
-            KeyType::combo(Modifiers::LGUI, KeyCode::SPACE),
-            KeyType::media(consumer::VOLUME_UP),
+        for code in KeyCode::all() {
+            let action = KeyType::key(code);
+            let text = describe(action);
+            assert_eq!(parse_action(&text).unwrap(), action, "round trip {text}");
+        }
+
+        for modifier in keymap::MODIFIER_NAMES {
+            let m = Modifiers::parse(modifier).unwrap();
+            let action = KeyType::combo(m, KeyCode::F13);
+            let text = describe(action);
+            assert_eq!(parse_action(&text).unwrap(), action, "round trip {text}");
+        }
+
+        let media_usages = [
+            consumer::PLAY_PAUSE,
+            consumer::NEXT,
+            consumer::PREVIOUS,
+            consumer::STOP,
+            consumer::MUTE,
+            consumer::VOLUME_UP,
+            consumer::VOLUME_DOWN,
+            consumer::BRIGHTNESS_UP,
+            consumer::BRIGHTNESS_DOWN,
+        ];
+        for usage in media_usages {
+            let action = KeyType::media(usage);
+            let text = describe(action);
+            assert_eq!(parse_action(&text).unwrap(), action, "round trip {text}");
+        }
+
+        for action in [
             KeyType::MouseMove(MouseMove { dx: 10, dy: -5 }),
             KeyType::Unassigned,
-        ];
-        for action in cases {
+        ] {
             let text = describe(action);
             assert_eq!(parse_action(&text).unwrap(), action, "round trip {text}");
         }

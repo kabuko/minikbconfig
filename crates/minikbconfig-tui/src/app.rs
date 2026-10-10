@@ -7,6 +7,7 @@ use minikbconfig_core::emitted::{Emitted, Match};
 use minikbconfig_core::keymap::{
     KEY_SLOTS, KeyCode as HidKeyCode, KeyTable, KeyType, control_name,
 };
+use minikbconfig_core::light::{self, LightConfig, MAX_MODE, MIN_MODE};
 use minikbconfig_hid::pad::{Pad, Report, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
@@ -44,10 +45,15 @@ pub enum Mode {
     #[default]
     Normal,
     /// Typing an action string.
-    Editing { input: String },
+    Editing {
+        input: String,
+        selected_suggestion: usize,
+    },
     /// Written and read back; waiting for the user to press the control to
     /// confirm the pad actually emits it.
     Verifying { slot: u8, action: KeyType },
+    /// Viewing and configuring pad lighting.
+    Lighting(LightingState),
 }
 
 pub struct App {
@@ -111,18 +117,53 @@ impl App {
         // Editing and verifying own every key while they are active, so a
         // stray 'q' while typing an action does not quit the app.
         if !matches!(self.mode, Mode::Normal) {
-            match (&mut self.mode, code) {
-                (Mode::Editing { .. }, KeyCode::Esc) => self.cancel(),
-                (Mode::Editing { input }, KeyCode::Enter) => {
-                    let text = std::mem::take(input);
-                    self.submit(&text);
+            match &mut self.mode {
+                Mode::Editing {
+                    input,
+                    selected_suggestion,
+                } => match handle_edit_key(input, selected_suggestion, code) {
+                    EditOutcome::Cancel => self.cancel(),
+                    EditOutcome::Submit => {
+                        let text = std::mem::take(input);
+                        self.submit(&text);
+                    }
+                    EditOutcome::Continue => {}
+                },
+                Mode::Verifying { .. } => {
+                    if code == KeyCode::Esc {
+                        self.cancel();
+                    }
                 }
-                (Mode::Editing { input }, KeyCode::Backspace) => {
-                    input.pop();
-                }
-                (Mode::Editing { input }, KeyCode::Char(c)) => input.push(c),
-                (Mode::Verifying { .. }, KeyCode::Esc) => self.cancel(),
-                _ => {}
+                Mode::Lighting(state) => match handle_lighting_key(state, self.pad.keys(), code) {
+                    LightingAction::None => {}
+                    LightingAction::WriteGlobal(cfg) => match self.pad.set_light_config(cfg) {
+                        Ok(stored) => {
+                            state.config = stored;
+                            self.status = Status::Ready;
+                        }
+                        Err(err) => {
+                            self.status = Status::Failed(format!("{err:#}"));
+                        }
+                    },
+                    LightingAction::WriteKeyColor { key, rgb } => {
+                        match self.pad.set_key_color(key, rgb) {
+                            Ok(()) => {
+                                self.status = Status::Ready;
+                            }
+                            Err(err) => {
+                                self.status = Status::Failed(format!("{err:#}"));
+                            }
+                        }
+                    }
+                    LightingAction::Refused(msg) => {
+                        self.status = Status::Failed(msg);
+                    }
+                    LightingAction::Exit => {
+                        self.mode = Mode::Normal;
+                    }
+                    LightingAction::Quit => return Ok(true),
+                },
+                Mode::Normal => {}
             }
             return Ok(false);
         }
@@ -130,6 +171,7 @@ impl App {
         match code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => return Ok(true),
             KeyCode::Char('r') | KeyCode::Char('R') => self.reload(),
+            KeyCode::Char('l') | KeyCode::Char('L') => self.open_lighting(),
             KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_pane(),
             KeyCode::Char('c') | KeyCode::Char('C') if self.show_pane() => self.reports.clear(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
@@ -150,7 +192,10 @@ impl App {
         } else {
             describe(row.action)
         };
-        self.mode = Mode::Editing { input: current };
+        self.mode = Mode::Editing {
+            input: current,
+            selected_suggestion: 0,
+        };
     }
 
     /// Apply the typed action, then verify it by observation.
@@ -171,6 +216,10 @@ impl App {
             Err(err) => {
                 // Stay in edit mode with the text, so it can be corrected
                 // rather than retyped.
+                self.mode = Mode::Editing {
+                    input: trimmed.to_string(),
+                    selected_suggestion: 0,
+                };
                 self.status = Status::Failed(format!("{err}"));
                 return;
             }
@@ -359,6 +408,23 @@ impl App {
         self.selected = move_selection(self.selected, -1, self.rows.len());
     }
 
+    pub fn pad_keys(&self) -> u8 {
+        self.pad.keys()
+    }
+
+    /// Enter lighting mode. Reads the current light config from the pad.
+    fn open_lighting(&mut self) {
+        match self.pad.light_config() {
+            Ok(config) => {
+                self.mode = Mode::Lighting(LightingState::new(config, self.pad.keys()));
+                self.status = Status::Ready;
+            }
+            Err(err) => {
+                self.status = Status::Failed(format!("failed to read light config: {err:#}"));
+            }
+        }
+    }
+
     pub fn rows(&self) -> &[Row] {
         &self.rows
     }
@@ -409,6 +475,453 @@ pub fn move_selection(current: usize, delta: isize, len: usize) -> usize {
         return 0;
     }
     (current as isize + delta).clamp(0, len as isize - 1) as usize
+}
+
+/// What the edit loop should do in response to a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditOutcome {
+    Continue,
+    Submit,
+    Cancel,
+}
+
+/// Handle a key event in editing mode.
+///
+/// Pure so it can be tested without hardware.
+pub fn handle_edit_key(
+    input: &mut String,
+    selected_suggestion: &mut usize,
+    code: KeyCode,
+) -> EditOutcome {
+    match code {
+        KeyCode::Esc => EditOutcome::Cancel,
+        KeyCode::Enter => EditOutcome::Submit,
+        KeyCode::Backspace => {
+            input.pop();
+            *selected_suggestion = 0;
+            EditOutcome::Continue
+        }
+        KeyCode::Char(c) => {
+            input.push(c);
+            *selected_suggestion = 0;
+            EditOutcome::Continue
+        }
+        KeyCode::Down => {
+            let suggs = minikbconfig_config::complete::suggestions(input);
+            if !suggs.is_empty() {
+                *selected_suggestion = (*selected_suggestion + 1).min(suggs.len() - 1);
+            }
+            EditOutcome::Continue
+        }
+        KeyCode::Up => {
+            if *selected_suggestion > 0 {
+                *selected_suggestion -= 1;
+            }
+            EditOutcome::Continue
+        }
+        KeyCode::Tab => {
+            let suggs = minikbconfig_config::complete::suggestions(input);
+            if !suggs.is_empty() {
+                if input.as_str() == suggs[*selected_suggestion].as_str() {
+                    *selected_suggestion = (*selected_suggestion + 1) % suggs.len();
+                }
+                *input = suggs[*selected_suggestion].clone();
+            }
+            EditOutcome::Continue
+        }
+        KeyCode::BackTab => {
+            let suggs = minikbconfig_config::complete::suggestions(input);
+            if !suggs.is_empty() {
+                *selected_suggestion = selected_suggestion
+                    .checked_sub(1)
+                    .unwrap_or(suggs.len() - 1);
+                *input = suggs[*selected_suggestion].clone();
+            }
+            EditOutcome::Continue
+        }
+        _ => EditOutcome::Continue,
+    }
+}
+
+/// Color presets available for quick selection in the lighting panel.
+pub const COLOR_PRESETS: [(&str, [u8; 3]); 8] = [
+    ("white", [0xFF, 0xFF, 0xFF]),
+    ("red", [0xFF, 0x00, 0x00]),
+    ("green", [0x00, 0xFF, 0x00]),
+    ("blue", [0x00, 0x00, 0xFF]),
+    ("cyan", [0x00, 0xFF, 0xFF]),
+    ("magenta", [0xFF, 0x00, 0xFF]),
+    ("yellow", [0xFF, 0xFF, 0x00]),
+    ("black", [0x00, 0x00, 0x00]),
+];
+
+/// Parse `#RRGGBB` into `[r, g, b]` bytes.
+pub fn parse_rgb_hex(hex: &str) -> Option<[u8; 3]> {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() != 6 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some([r, g, b])
+}
+
+/// Configurable fields in the lighting panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LightingField {
+    Brightness,
+    Mode,
+    Speed,
+    Direction,
+    GlobalColor,
+    TargetKey,
+    KeyColor,
+}
+
+impl LightingField {
+    pub const ALL: [LightingField; 7] = [
+        LightingField::Brightness,
+        LightingField::Mode,
+        LightingField::Speed,
+        LightingField::Direction,
+        LightingField::GlobalColor,
+        LightingField::TargetKey,
+        LightingField::KeyColor,
+    ];
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Brightness => 0,
+            Self::Mode => 1,
+            Self::Speed => 2,
+            Self::Direction => 3,
+            Self::GlobalColor => 4,
+            Self::TargetKey => 5,
+            Self::KeyColor => 6,
+        }
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL[i % Self::ALL.len()]
+    }
+}
+
+/// State for the lighting configuration panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LightingState {
+    pub config: LightConfig,
+    pub field: LightingField,
+    pub global_preset_idx: usize,
+    pub global_hex_input: String,
+    pub target_key: u8,
+    pub key_preset_idx: usize,
+    pub key_hex_input: String,
+}
+
+impl LightingState {
+    pub fn new(config: LightConfig, _keys: u8) -> Self {
+        LightingState {
+            config,
+            field: LightingField::Brightness,
+            global_preset_idx: 0,
+            global_hex_input: String::new(),
+            target_key: 0,
+            key_preset_idx: 0,
+            key_hex_input: String::new(),
+        }
+    }
+
+    pub fn current_global_rgb(&self) -> [u8; 3] {
+        if let Some(rgb) = parse_rgb_hex(&self.global_hex_input) {
+            rgb
+        } else {
+            COLOR_PRESETS[self.global_preset_idx % COLOR_PRESETS.len()].1
+        }
+    }
+
+    pub fn current_key_rgb(&self) -> [u8; 3] {
+        if let Some(rgb) = parse_rgb_hex(&self.key_hex_input) {
+            rgb
+        } else {
+            COLOR_PRESETS[self.key_preset_idx % COLOR_PRESETS.len()].1
+        }
+    }
+}
+
+/// Action produced by `handle_lighting_key`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LightingAction {
+    None,
+    WriteGlobal(LightConfig),
+    WriteKeyColor { key: u8, rgb: [u8; 3] },
+    Refused(String),
+    Exit,
+    Quit,
+}
+
+/// Pure handler for key events in lighting mode.
+pub fn handle_lighting_key(
+    state: &mut LightingState,
+    pad_keys: u8,
+    code: KeyCode,
+) -> LightingAction {
+    let max_key = pad_keys.saturating_sub(1);
+    match code {
+        KeyCode::Esc => LightingAction::Exit,
+        KeyCode::Char('q') | KeyCode::Char('Q') => LightingAction::Quit,
+        KeyCode::Down | KeyCode::Char('j') => {
+            let next = (state.field.index() + 1) % LightingField::ALL.len();
+            state.field = LightingField::from_index(next);
+            LightingAction::None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let prev = if state.field.index() == 0 {
+                LightingField::ALL.len() - 1
+            } else {
+                state.field.index() - 1
+            };
+            state.field = LightingField::from_index(prev);
+            LightingAction::None
+        }
+        KeyCode::Char(c @ '0'..='9') => {
+            let digit = c as u8 - b'0';
+            match state.field {
+                LightingField::Mode => {
+                    if (MIN_MODE..=MAX_MODE).contains(&digit) {
+                        state.config.mode = digit;
+                        LightingAction::WriteGlobal(state.config)
+                    } else {
+                        LightingAction::Refused(format!(
+                            "mode must be {MIN_MODE}..={MAX_MODE} (got '{c}'); modes outside 1-6 are silently discarded by firmware"
+                        ))
+                    }
+                }
+                LightingField::Brightness => {
+                    if digit <= 4 {
+                        state.config.brightness = digit;
+                        LightingAction::WriteGlobal(state.config)
+                    } else {
+                        LightingAction::Refused(format!("brightness must be 0..=4 (got '{c}')"))
+                    }
+                }
+                LightingField::TargetKey => {
+                    if digit <= max_key {
+                        state.target_key = digit;
+                        LightingAction::None
+                    } else {
+                        LightingAction::Refused(format!(
+                            "key index must be 0..={max_key} (got '{c}')"
+                        ))
+                    }
+                }
+                LightingField::GlobalColor => {
+                    if state.global_hex_input.len() < 7 {
+                        state.global_hex_input.push(c);
+                    }
+                    LightingAction::None
+                }
+                LightingField::KeyColor => {
+                    if state.key_hex_input.len() < 7 {
+                        state.key_hex_input.push(c);
+                    }
+                    LightingAction::None
+                }
+                _ => LightingAction::None,
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_hexdigit() || c == '#' => match state.field {
+            LightingField::GlobalColor => {
+                if state.global_hex_input.len() < 7 {
+                    state.global_hex_input.push(c);
+                }
+                LightingAction::None
+            }
+            LightingField::KeyColor => {
+                if state.key_hex_input.len() < 7 {
+                    state.key_hex_input.push(c);
+                }
+                LightingAction::None
+            }
+            _ => LightingAction::None,
+        },
+        KeyCode::Backspace => match state.field {
+            LightingField::GlobalColor => {
+                state.global_hex_input.pop();
+                LightingAction::None
+            }
+            LightingField::KeyColor => {
+                state.key_hex_input.pop();
+                LightingAction::None
+            }
+            _ => LightingAction::None,
+        },
+        KeyCode::Left | KeyCode::Char('h') => match state.field {
+            LightingField::Brightness => {
+                state.config.brightness = state.config.brightness.saturating_sub(1);
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Mode => {
+                let m = state.config.mode;
+                if m > MIN_MODE && m <= MAX_MODE {
+                    state.config.mode = m - 1;
+                } else {
+                    state.config.mode = MIN_MODE;
+                }
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Speed => {
+                state.config.speed = state.config.speed.saturating_sub(1);
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Direction => {
+                state.config.direction = if state.config.direction == 0 {
+                    3
+                } else {
+                    state.config.direction - 1
+                };
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::GlobalColor => {
+                state.global_hex_input.clear();
+                state.global_preset_idx = if state.global_preset_idx == 0 {
+                    COLOR_PRESETS.len() - 1
+                } else {
+                    state.global_preset_idx - 1
+                };
+                let rgb = COLOR_PRESETS[state.global_preset_idx].1;
+                let [h, s, v] = light::rgb_to_hsv(rgb);
+                state.config.hue = h;
+                state.config.saturation = s;
+                state.config.value = v;
+                state.config.cycle = 1;
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::TargetKey => {
+                state.target_key = state.target_key.saturating_sub(1);
+                LightingAction::None
+            }
+            LightingField::KeyColor => {
+                state.key_hex_input.clear();
+                state.key_preset_idx = if state.key_preset_idx == 0 {
+                    COLOR_PRESETS.len() - 1
+                } else {
+                    state.key_preset_idx - 1
+                };
+                let rgb = COLOR_PRESETS[state.key_preset_idx].1;
+                LightingAction::WriteKeyColor {
+                    key: state.target_key,
+                    rgb,
+                }
+            }
+        },
+        KeyCode::Right | KeyCode::Char('l') => match state.field {
+            LightingField::Brightness => {
+                if state.config.brightness < 4 {
+                    state.config.brightness += 1;
+                }
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Mode => {
+                let m = state.config.mode;
+                if (MIN_MODE..MAX_MODE).contains(&m) {
+                    state.config.mode = m + 1;
+                } else {
+                    state.config.mode = MAX_MODE;
+                }
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Speed => {
+                state.config.speed = state.config.speed.saturating_add(1);
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::Direction => {
+                state.config.direction = (state.config.direction + 1) % 4;
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::GlobalColor => {
+                state.global_hex_input.clear();
+                state.global_preset_idx = (state.global_preset_idx + 1) % COLOR_PRESETS.len();
+                let rgb = COLOR_PRESETS[state.global_preset_idx].1;
+                let [h, s, v] = light::rgb_to_hsv(rgb);
+                state.config.hue = h;
+                state.config.saturation = s;
+                state.config.value = v;
+                state.config.cycle = 1;
+                LightingAction::WriteGlobal(state.config)
+            }
+            LightingField::TargetKey => {
+                if state.target_key < max_key {
+                    state.target_key += 1;
+                }
+                LightingAction::None
+            }
+            LightingField::KeyColor => {
+                state.key_hex_input.clear();
+                state.key_preset_idx = (state.key_preset_idx + 1) % COLOR_PRESETS.len();
+                let rgb = COLOR_PRESETS[state.key_preset_idx].1;
+                LightingAction::WriteKeyColor {
+                    key: state.target_key,
+                    rgb,
+                }
+            }
+        },
+        KeyCode::Enter => match state.field {
+            LightingField::GlobalColor => {
+                if !state.global_hex_input.is_empty() {
+                    match parse_rgb_hex(&state.global_hex_input) {
+                        Some(rgb) => {
+                            let [h, s, v] = light::rgb_to_hsv(rgb);
+                            state.config.hue = h;
+                            state.config.saturation = s;
+                            state.config.value = v;
+                            state.config.cycle = 1;
+                            LightingAction::WriteGlobal(state.config)
+                        }
+                        None => LightingAction::Refused(format!(
+                            "'{}' is not a valid 6-hex-digit colour (e.g. #ff00ff)",
+                            state.global_hex_input
+                        )),
+                    }
+                } else {
+                    let rgb = COLOR_PRESETS[state.global_preset_idx % COLOR_PRESETS.len()].1;
+                    let [h, s, v] = light::rgb_to_hsv(rgb);
+                    state.config.hue = h;
+                    state.config.saturation = s;
+                    state.config.value = v;
+                    state.config.cycle = 1;
+                    LightingAction::WriteGlobal(state.config)
+                }
+            }
+            LightingField::KeyColor => {
+                if !state.key_hex_input.is_empty() {
+                    match parse_rgb_hex(&state.key_hex_input) {
+                        Some(rgb) => LightingAction::WriteKeyColor {
+                            key: state.target_key,
+                            rgb,
+                        },
+                        None => LightingAction::Refused(format!(
+                            "'{}' is not a valid 6-hex-digit colour (e.g. #ff00ff)",
+                            state.key_hex_input
+                        )),
+                    }
+                } else {
+                    let rgb = COLOR_PRESETS[state.key_preset_idx % COLOR_PRESETS.len()].1;
+                    LightingAction::WriteKeyColor {
+                        key: state.target_key,
+                        rgb,
+                    }
+                }
+            }
+            _ => {
+                if !state.config.has_valid_mode() {
+                    state.config.mode = MIN_MODE;
+                }
+                LightingAction::WriteGlobal(state.config)
+            }
+        },
+        _ => LightingAction::None,
+    }
 }
 
 /// How many reports the pane keeps.
@@ -526,6 +1039,167 @@ mod tests {
         assert_eq!(move_selection(0, -1, 0), 0);
         // And an index left over from a longer list is pulled back in range.
         assert_eq!(move_selection(7, 0, 3), 2);
+    }
+
+    #[test]
+    fn typing_and_tab_completion_replaces_field_wholesale() {
+        let mut input = String::from("key:ctr");
+        let mut selected = 0;
+        let outcome = handle_edit_key(&mut input, &mut selected, KeyCode::Tab);
+        assert_eq!(outcome, EditOutcome::Continue);
+        assert_eq!(input, "key:ctrl-");
+
+        // Type 'sp'
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Char('s'));
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Char('p'));
+        assert_eq!(input, "key:ctrl-sp");
+
+        // Tab completes to space
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Tab);
+        assert_eq!(input, "key:ctrl-space");
+
+        // Enter submits
+        let outcome = handle_edit_key(&mut input, &mut selected, KeyCode::Enter);
+        assert_eq!(outcome, EditOutcome::Submit);
+    }
+
+    #[test]
+    fn arrow_keys_navigate_suggestions_and_esc_cancels() {
+        let mut input = String::from("key:ctrl-");
+        let mut selected = 0;
+
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Down);
+        assert_eq!(selected, 1);
+
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Up);
+        assert_eq!(selected, 0);
+
+        let outcome = handle_edit_key(&mut input, &mut selected, KeyCode::Esc);
+        assert_eq!(outcome, EditOutcome::Cancel);
+    }
+
+    #[test]
+    fn backspace_resets_selected_suggestion() {
+        let mut input = String::from("key:ctrl-");
+        let mut selected = 5;
+
+        let _ = handle_edit_key(&mut input, &mut selected, KeyCode::Backspace);
+        assert_eq!(input, "key:ctrl");
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn lighting_mode_clamping_and_refusal() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.field = LightingField::Mode;
+
+        // Digit 1-6 is accepted and writes config
+        match handle_lighting_key(&mut state, 6, KeyCode::Char('3')) {
+            LightingAction::WriteGlobal(cfg) => assert_eq!(cfg.mode, 3),
+            other => panic!("expected WriteGlobal, got {:?}", other),
+        }
+
+        // Mode 0 must be refused with explanation (firmware discards 0)
+        match handle_lighting_key(&mut state, 6, KeyCode::Char('0')) {
+            LightingAction::Refused(msg) => {
+                assert!(msg.contains("mode must be 1..=6"), "got: {msg}");
+                assert!(msg.contains("silently discarded"), "got: {msg}");
+            }
+            other => panic!("expected Refused, got {:?}", other),
+        }
+
+        // Mode 7+ must be refused with explanation (firmware discards 7+)
+        match handle_lighting_key(&mut state, 6, KeyCode::Char('7')) {
+            LightingAction::Refused(msg) => {
+                assert!(msg.contains("mode must be 1..=6"), "got: {msg}");
+            }
+            other => panic!("expected Refused, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lighting_brightness_bounds_and_refusal() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.field = LightingField::Brightness;
+
+        // Digits 0-4 are valid
+        match handle_lighting_key(&mut state, 6, KeyCode::Char('4')) {
+            LightingAction::WriteGlobal(cfg) => assert_eq!(cfg.brightness, 4),
+            other => panic!("expected WriteGlobal, got {:?}", other),
+        }
+
+        // Digit 5+ is refused
+        match handle_lighting_key(&mut state, 6, KeyCode::Char('5')) {
+            LightingAction::Refused(msg) => {
+                assert!(msg.contains("brightness must be 0..=4"), "got: {msg}");
+            }
+            other => panic!("expected Refused, got {:?}", other),
+        }
+
+        // Right arrow clamps at 4
+        match handle_lighting_key(&mut state, 6, KeyCode::Right) {
+            LightingAction::WriteGlobal(cfg) => assert_eq!(cfg.brightness, 4),
+            other => panic!("expected WriteGlobal, got {:?}", other),
+        }
+
+        // Left arrow decrements
+        match handle_lighting_key(&mut state, 6, KeyCode::Left) {
+            LightingAction::WriteGlobal(cfg) => assert_eq!(cfg.brightness, 3),
+            other => panic!("expected WriteGlobal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lighting_per_key_color_write() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.field = LightingField::TargetKey;
+
+        // Set target key to 2
+        let _ = handle_lighting_key(&mut state, 6, KeyCode::Char('2'));
+        assert_eq!(state.target_key, 2);
+
+        // Move to KeyColor
+        state.field = LightingField::KeyColor;
+
+        // Change color with right arrow: selects next preset and writes key color
+        match handle_lighting_key(&mut state, 6, KeyCode::Right) {
+            LightingAction::WriteKeyColor { key, rgb } => {
+                assert_eq!(key, 2);
+                assert_eq!(rgb, COLOR_PRESETS[1].1);
+            }
+            other => panic!("expected WriteKeyColor, got {:?}", other),
+        }
+
+        // Custom hex input and Enter
+        state.key_hex_input = "ff00aa".to_string();
+        match handle_lighting_key(&mut state, 6, KeyCode::Enter) {
+            LightingAction::WriteKeyColor { key, rgb } => {
+                assert_eq!(key, 2);
+                assert_eq!(rgb, [0xFF, 0x00, 0xAA]);
+            }
+            other => panic!("expected WriteKeyColor, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lighting_navigation_and_exit() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        assert_eq!(state.field, LightingField::Brightness);
+
+        let _ = handle_lighting_key(&mut state, 6, KeyCode::Down);
+        assert_eq!(state.field, LightingField::Mode);
+
+        let _ = handle_lighting_key(&mut state, 6, KeyCode::Up);
+        assert_eq!(state.field, LightingField::Brightness);
+
+        assert_eq!(
+            handle_lighting_key(&mut state, 6, KeyCode::Esc),
+            LightingAction::Exit
+        );
+        assert_eq!(
+            handle_lighting_key(&mut state, 6, KeyCode::Char('q')),
+            LightingAction::Quit
+        );
     }
 }
 

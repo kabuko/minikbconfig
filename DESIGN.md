@@ -236,7 +236,7 @@ minikbconfig-core    protocol encode/decode + key model (pure, unit-tested)
 minikbconfig-config  action grammar, rendering, snapshot format, apply plan
 minikbconfig-hid     hidapi backend + device discovery
 minikbconfig         CLI binary
-minikbconfig-tui     ratatui editor (slot list so far; tracked as minikbconfig-ijk)
+minikbconfig-tui     interactive ratatui editor (browsing, editing, completion, verification)
 ```
 
 `minikbconfig-hid` holds everything that touches hardware, with no knowledge of
@@ -261,17 +261,25 @@ CLI:
 minikbconfig info                 enumerate pads, show interface + descriptor + live config
 minikbconfig dump                 print the device's current key map
 minikbconfig keys                 list supported types and code names
-minikbconfig set <index> <action> set one key, e.g. `minikbconfig set 1 key:ctrl-c`
+minikbconfig set [-V] <i> <act>   set one key, e.g. `minikbconfig set 1 key:ctrl-c` (-V verifies)
 minikbconfig led                  show lighting state; `led on|off`, `led key <n> <#rrggbb>`
 minikbconfig snapshot <file>      save the current configuration
 minikbconfig apply <file>         program a configuration
 minikbconfig profile [n]          show or switch the active profile
-minikbconfig watch [seconds]      live decode of what the pad emits
+minikbconfig watch [seconds]      live decode of what the pad emits (--raw shows every report)
 minikbconfig completions <shell>  print a completion script for bash, zsh or fish
 ```
 
+An earlier draft considered a dedicated `set-knob <part> <action>` command, but
+it was deliberately omitted. Knobs occupy ordinary slots in the table (slots
+`16..=18` for knob 1, `19..=21` for knob 2) and `minikbconfig set 16 media:mute`
+already works directly. Hardware slot mapping belongs in `minikbconfig-core`
+(`control_name`) rather than a redundant CLI command.
+
 The interactive editor is a separate binary, `minikbconfig-tui`, not a
-subcommand.
+subcommand. It provides slot browsing labelled by model-specific physical control,
+in-place action editing with inline completion and live validation, write
+read-back verification, and a live emitted-event report pane.
 
 Shell completion is generated rather than hand-written, from the same tables
 the parser reads (`minikbconfig-config::complete`). A suggestion that does not
