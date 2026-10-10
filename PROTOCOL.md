@@ -218,7 +218,7 @@ is rejected. So turning the lights on requires choosing a mode as well.
 | 5 | direction; stored verbatim for every value tried (0-255), unlike mode |
 | 6 | colour/cycle flag (the vendor clears it when mode is 0) |
 | 7 | single-colour index; the vendor writes 0, the device reports 255 |
-| 8-10 | hue, saturation, value, each 0-255. `value` 0 is dark and anything above it is full — it gates, it does not dim |
+| 8-10 | hue, saturation, value, each 0-255. `value` is the real brightness control: 0 is off, higher is brighter |
 
 Colour bytes come from `#RRGGBB` converted to HSV with hue in degrees and s/v
 as percentages, each then scaled by /360 or /100 into a byte. Because value is
@@ -309,20 +309,24 @@ saturated green leaves them plainly lit. So:
 
 | byte | effect |
 |---|---|
-| `value` (colour) | **on/off only** — 0 is dark, anything above 0 is full |
+| `value` (colour) | **the brightness control** — 0 is off, higher is brighter |
+| `hue`, `saturation` | the colour |
 | `brightness` | **none observed** |
 | `direction` | **none observed** |
 | `speed` | real: mode 3 fade, mode 4 rate |
 
-`led off` works because it zeroes the colour *and* sets brightness; only the
-colour part matters.
+`led off` works because it zeroes the colour; the brightness it also sets is
+irrelevant.
 
-Two of the four fields the light record carries are inert on this firmware, and
-both are exposed as primary controls in the vendor app. Whether this pad simply
-ignores them or drives output from HSV `value` alone is not established — the
-That test was run: a mid-range value of 64 shows no visible dimming against 255,
-so `value` is a gate rather than a level. Nothing in the light record dims the
-output on this firmware.
+**`value` is the real brightness control.** Measured: value 64 (`#404040`) is
+visibly dimmer than value 255 at the same brightness setting. So the firmware
+drives LED output from the colour's HSV `value`, and byte 3 is unused as fitted
+to this pad.
+
+Two of the light record's fields are therefore inert here, and both are exposed
+as primary controls in the vendor app. Its brightness slider has no counterpart
+in this firmware, while its colour picker does everything that slider appears to
+do and more.
 
 The tool's own `is_lit()` was wrong because of this: it computed
 `brightness > 0 && value > 0` and so reported "dark" for a lit green at

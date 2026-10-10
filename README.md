@@ -191,7 +191,8 @@ Being straight about this, since it is easy to overstate:
   as the least-proven part of the tool.
 
 **Known not to work on these models**, measured rather than assumed: brightness
-has no effect, `direction` has no effect, the output does not dim, and per-key
+has no effect, `direction` has no effect, brightness comes from the colour's
+value rather than the brightness byte, and per-key
 colour is visible only in effect mode 5. See
 [PROTOCOL.md](PROTOCOL.md) for the evidence.
 
