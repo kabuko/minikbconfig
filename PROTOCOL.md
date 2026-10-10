@@ -167,8 +167,8 @@ but untested.
 | `13 3B <off>` | write key colours (bulk) | W | ✓ |
 | `14 03 <idx>` | set one key colour | W | ✓ |
 | `16 00 00 00 01 00 <mode>` | set light effect mode | W | ✓ |
-| `40 <len> <off> …` | write URL config | W | unverified |
-| `41 <len> <off>` | read URL config | R | unverified |
+| `40 <len> <off> …` | write URL config | W | 59-byte write chunks, §4c |
+| `41 <len> <off>` | read URL config | R | 128-byte area, 56-byte read chunks, §4c |
 | `55 …` | firmware update / DFU | W | **untested, destructive** |
 | `5A A0` | enter IAP (bootloader) | W | **untested, destructive** |
 | `FB <profile>` | set current profile (index in byte 2) | W | ✓ |
@@ -542,6 +542,62 @@ shown a "key 4".
 The index→control mapping is a property of the device's key layout, not of the
 protocol, so it is the one part that varies across the family. Discover it
 empirically by writing distinct codes and observing which control emits them.
+
+## 4c. URL bindings
+
+The URL area is **128 bytes** and the URL is **not stored as text**. It is a
+substitution cipher over a 62-symbol alphabet: each character becomes one byte,
+`0xFF` terminates.
+
+| Cmd | Hex | Direction | Shape |
+|---|---|---|---|
+| 64 | `0x40` | W | `[64, len, off_lo, off_hi, …]` |
+| 65 | `0x41` | R | `[65, len, off_lo, off_hi]` — payload at reply byte 8 |
+
+Writes step by 59 bytes, reads by 56.
+
+### Alphabet
+
+The table maps each character to a byte. Several characters deliberately share a
+byte, so the mapping is many-to-one:
+
+| byte | characters |
+|---|---|
+| 4-29 | `a`-`z`, case-insensitive |
+| 30-39 | digits `1`-`9`, `0` last |
+| 40 | newline |
+| 44 | space |
+| 45 | `-`, `_` |
+| 46 | `=` |
+| 47-48 | `[`, `]` |
+| 50 | `\` |
+| 51 | `;`, `:` |
+| 52 | `'` |
+| 53 | `` ` `` |
+| 54 | `,` |
+| 55 | `.`, `>` |
+| 56 | `/`, `?` |
+
+Decoding reverses it, and applies three substitutions on the way: `;`→`:`,
+`?`→`/`, `>`→`.`. Anything not in the table is skipped.
+
+### Two defects in the vendor's own codec
+
+**Case is unrecoverable.** `a` and `A` both encode to byte 4, and decoding
+lowercases everything. `https://Example.COM` round-trips to
+`https://example.com`.
+
+**`?` is not `?`.** `?` encodes to the same byte as `/` (56), and decoding maps
+that byte to `/`. So a query string is silently rewritten: `www.a.co/x?y=1`
+round-trips to `www.a.co/x/y=1`. Combined with case folding, any URL needing
+distinct `?` or uppercase cannot survive a round trip.
+
+This is the vendor's bug, not ours — reproducing the codec exactly reproduces
+both. Worth knowing before offering `url:` bindings, since a bound key would open
+a subtly different address than the one configured.
+
+The bound key is type `0x80` (OpenWebsite) with all three code bytes zero; the
+URL itself lives only in this 128-byte area.
 
 ## 5. Layers
 
