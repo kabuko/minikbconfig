@@ -234,9 +234,16 @@ impl Pad {
 
     /// Read every key's colour, one RGB triple per key.
     ///
-    /// Exists so a per-key colour write can be attempted rather than assumed.
-    /// Measured on both models as returning all zeros, so a caller must treat an
-    /// all-black table as "no information", not as "every key is black".
+    /// # Warning
+    ///
+    /// This erases key 1's colour. Command `12` carries no offset, so the
+    /// firmware applies it at offset 0 as a write of zeros. Measured on the
+    /// 6-key model: `14` to offset 0 shows red; the same `14` followed by this
+    /// call leaves the key dark.
+    ///
+    /// It exists because the framing is documented in PROTOCOL.md as a read and
+    /// something has to be able to try it, and because reproducing the finding
+    /// needs a caller. No user-facing path may use it.
     pub fn key_colors(&self) -> anyhow::Result<Vec<(u8, [u8; 3])>> {
         let report = light::read_key_colors();
         let reply = self.exchange_bytes(&report, 0x12)?;

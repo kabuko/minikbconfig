@@ -318,10 +318,40 @@ discarded before one write was made and observed on its own: an earlier batch ha
 probe reports landing on neighbouring keys and overwriting what had just been
 set, which made it look as though index 0 and index 1 were both broken.
 
-**`12` cannot verify anything.** It answers `aa 12 01` followed by all zeros for
-every length and offset tried, so the read shape is wrong or unimplemented —
-not that the write failed. `led key` reports that honestly rather than
-pretending to confirm.
+### Command `12` is not a read. It erases key 1.
+
+**Never send `12`.** The framing carries no offset, so the firmware applies it
+at offset 0 and treats the request as a write of zeros.
+
+Proven directly, one variable at a time:
+
+```
+14 write, offset 0, red   -> key 1 is red
+14 write, offset 0, red
+  then 12 read            -> key 1 goes dark
+```
+
+This is the single most damaging thing found about this protocol, and it was
+sitting in our own verification path. `led key` wrote the colour and then read
+it back, and the read-back **erased key 1's colour**. Every `led key` invocation
+was destroying index 0 immediately after setting it, which is why index 0
+appeared to be an unwritable key.
+
+It also explains the symptom that pointed here: the colour flashed red and then
+went off. The write landed; the read-back killed it.
+
+Consequences, all now in place:
+
+- `led key` does not attempt a read-back. There is no usable one to attempt.
+- `Pad::key_colors` and `light::read_key_colors` are kept only so this finding
+  can be reproduced. Both carry `# Warning` docs saying so. Nothing in the CLI or
+  TUI may call them.
+- Writes cannot be confirmed programmatically. Confirm with
+  `minikbconfig led on --mode 5`, which is the only view that shows per-key
+  colours.
+
+All six keys accept writes, index 0 included. A six-colour rainbow writes
+correctly.
 
 The wrong conclusion, recorded because it is easy to repeat: testing a per-key
 write in a global-display mode, seeing no change, and concluding the feature is

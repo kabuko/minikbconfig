@@ -237,10 +237,15 @@ pub fn set_key_color(index: u8, rgb: [u8; 3]) -> Result<[u8; REPORT_LEN], Protoc
 
 /// Build the report that reads every key colour (command `0x12`).
 ///
-/// Documented in PROTOCOL.md as the read counterpart of `14`, but measured on
-/// hardware to answer `aa 12 01` followed by all zeros for every length and
-/// offset tried. Kept because it costs nothing to ask, and a firmware that does
-/// implement it would let `led key` confirm its write instead of guessing.
+/// **Do not send this.** It is not a read. Measured on the 6-key model: a `14`
+/// write to offset 0 followed by this command leaves the key dark, while the
+/// same write with no `12` afterwards shows the colour immediately. Since the
+/// framing carries no offset, the firmware applies it at offset 0 and treats the
+/// request as a write of zeros.
+///
+/// So it silently erases key 1's colour, which is why per-key colour writes to
+/// index 0 appeared to fail. The function is kept only so the probe that
+/// established this can be reproduced; nothing in the CLI or TUI may call it.
 pub fn read_key_colors() -> [u8; REPORT_LEN] {
     let mut buf = [0u8; REPORT_LEN];
     buf[0] = crate::protocol::PREFIX;
@@ -359,10 +364,18 @@ mod tests {
 
     #[test]
     fn the_read_request_matches_the_write_framing() {
+        // Kept as a characterisation test, not an endorsement: this request is
+        // destructive. It is pinned here so that anyone changing the framing
+        // has to look at the warning, and so the probe can be reproduced.
         let r = read_key_colors();
         assert_eq!(r[0], crate::protocol::PREFIX);
         assert_eq!(r[1], 0x12);
         assert_eq!(r[2], 3, "three bytes per colour, as `14` writes");
+        // No offset field, which is precisely why the firmware applies it at
+        // offset 0 and wipes key 1's colour. If a real read framing is ever
+        // found, this assertion should fail.
+        assert_eq!(r[3], 0, "no offset is sent - see the warning above");
+        assert_eq!(r[4], 0);
     }
 
     #[test]

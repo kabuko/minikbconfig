@@ -584,31 +584,16 @@ fn cmd_led_key(args: &[String]) -> anyhow::Result<()> {
     let pad = Pad::open()?;
     pad.set_key_color(index, rgb)?;
 
-    // Command 12 answers `aa 12 01` followed by zeros on every firmware tried,
-    // so it cannot confirm anything. The write is nonetheless real - see the
-    // note below - so this reports what is known and stops pretending to verify.
-    match pad.key_colors() {
-        Ok(table) => match table.iter().find(|(i, _)| *i == index) {
-            Some((_, stored)) if *stored == rgb => {
-                println!("  key[{index:2}] colour set to {hex}");
-                println!("  confirmed: the pad reports it back");
-            }
-            Some((_, [0, 0, 0])) => println!(
-                "  key[{index:2}] wrote {hex}; command 12 reports black, which is what it \
-                 always reports and carries no information"
-            ),
-            Some((_, stored)) => println!(
-                "  key[{index:2}] wrote {hex}; command 12 reports #{:02x}{:02x}{:02x} there",
-                stored[0], stored[1], stored[2]
-            ),
-            None => println!("  key[{index:2}] wrote {hex}; command 12 returned no entry"),
-        },
-        Err(err) => println!("  key[{index:2}] wrote {hex}; could not read it back: {err:#}"),
-    }
+    // No read-back. Command 12 is not a read: it carries no offset, so the
+    // firmware applies it at offset 0 and erases key 1's colour. Verified on
+    // hardware - the same write shows the colour without the 12 and leaves the
+    // key dark with it. So `led key` cannot confirm itself, and must not try.
+    println!("  key[{index:2}] wrote {hex}");
     println!(
-        "  note: per-key colour is real, but only visible in effect mode 5. Modes 1 and 4 \
-         paint every key with the global colour and hide it. Set `led on --mode 5` to see it."
+        "  not confirmed: this pad has no usable colour read-back. The write is \
+         acknowledged, and command 12 would erase key 1 rather than report it."
     );
+    println!("  see it with `minikbconfig led on --mode 5`, which shows per-key colours.");
     Ok(())
 }
 
