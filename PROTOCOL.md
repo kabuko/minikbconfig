@@ -224,6 +224,36 @@ Colour bytes come from `#RRGGBB` converted to HSV with hue in degrees and s/v
 as percentages, each then scaled by /360 or /100 into a byte. Because value is
 `max(r,g,b)`, it is simply the brightest channel.
 
+### Colour is verified across the wheel
+
+Swept on the 6-key model by setting a colour and looking at the pad. Every
+observation lands where the standard `byte / 255 * 360` mapping predicts:
+
+| byte | degrees | observed |
+|---|---|---|
+| 0 | 0 | red |
+| 22 | 31 | orange, yellow-leaning |
+| 85 | 120 | green |
+| 94 | 133 | cyan, green side |
+| 107 | 151 | spring-cyan |
+| 117 | 165 | pale blue |
+| 170 | 240 | blue |
+
+So `hex_to_hsv` and the `/360` scaling are both correct, and the device renders
+the hue byte the way the vendor writes it. Two earlier readings of this looked
+like bugs and were not:
+
+- `#00ff88` (byte 107, 151 degrees) reads as light blue. It is spring-cyan, and
+  that description is defensible.
+- Cyan-greens near a hue boundary are **bad test colours**. `#00ff00`,
+  `#ff0000` and `#0000ff` are the discriminators; anything in the 130-165 degree
+  band will be called "blue" by one person and "green" by another, which sends
+  you looking for a fault in the arithmetic that is not there.
+
+The failure mode to avoid: one surprising colour read as a broken hue mapping,
+then a second theory invented to explain the first theory being wrong. Collect
+the whole band before concluding anything.
+
 **`16` is a query, not the write.** The vendor's `setLightEffectConfig` sends
 `[22, 0, 0, 0, 1, 0, mode]`, reads the reply, patches byte 2 of the returned
 config with the mode, and writes the whole record back with `0B`. So `16` on
