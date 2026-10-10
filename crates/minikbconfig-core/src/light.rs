@@ -235,6 +235,39 @@ pub fn set_key_color(index: u8, rgb: [u8; 3]) -> Result<[u8; REPORT_LEN], Protoc
     Ok(buf)
 }
 
+/// Build the report that reads every key colour (command `0x12`).
+///
+/// Documented in PROTOCOL.md as the read counterpart of `14`, but measured on
+/// hardware to answer `aa 12 01` followed by all zeros for every length and
+/// offset tried. Kept because it costs nothing to ask, and a firmware that does
+/// implement it would let `led key` confirm its write instead of guessing.
+pub fn read_key_colors() -> [u8; REPORT_LEN] {
+    let mut buf = [0u8; REPORT_LEN];
+    buf[0] = crate::protocol::PREFIX;
+    buf[1] = 0x12;
+    buf[2] = 3;
+    buf
+}
+
+/// Decode the reply to [`read_key_colors`] into one RGB triple per key.
+///
+/// Keys beyond `keys` are dropped: the device fills `KEY_SLOTS` triples
+/// regardless of how many keys are fitted, so reading a 6-key pad with the
+/// 3-key geometry would report knobs as lit keys.
+pub fn parse_key_colors(reply: &[u8], keys: u8) -> Vec<(u8, [u8; 3])> {
+    let count = keys.min(crate::keymap::KEY_SLOTS);
+    let end = 8 + usize::from(count) * 3;
+    if reply.len() < end {
+        return Vec::new();
+    }
+    (0..count)
+        .map(|i| {
+            let at = 8 + usize::from(i) * 3;
+            (i, [reply[at], reply[at + 1], reply[at + 2]])
+        })
+        .collect()
+}
+
 /// Convert `#RRGGBB` into the packed HSV bytes the device stores.
 ///
 /// Mirrors the vendor's `HW()` helper: `#RRGGBB` is converted to HSV with hue
@@ -288,6 +321,59 @@ pub fn rgb_to_hsv([r, g, b]: [u8; 3]) -> [u8; 3] {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_key_colour_reply_is_decoded_one_triple_per_key() {
+        let mut reply = [0u8; 64];
+        // Red on key 0, green on key 1, rest black.
+        reply[8] = 0xFF; // key 0, byte 0
+        reply[12] = 0xFF; // key 1 spans 11,12,13 = R,G,B; this is green
+        let got = parse_key_colors(&reply, 3);
+        assert_eq!(got.len(), 3, "only the fitted keys, not all 28 slots");
+        assert_eq!(got[0], (0, [0xFF, 0, 0]));
+        assert_eq!(got[1], (1, [0, 0xFF, 0]));
+        assert_eq!(got[2], (2, [0, 0, 0]));
+    }
+
+    #[test]
+    fn a_short_reply_decodes_to_nothing_rather_than_panicking() {
+        assert!(parse_key_colors(&[0u8; 4], 6).is_empty());
+        assert!(parse_key_colors(&[0u8; 16], 6).is_empty());
+    }
+
+    #[test]
+    fn a_six_key_pad_is_not_read_as_if_it_were_three() {
+        // The device fills KEY_SLOTS triples whatever is fitted, so using the
+        // wrong count would report knob slots as lit keys.
+        let mut reply = [0u8; 64];
+        reply[8 + 15] = 0xFF;
+        let got = parse_key_colors(&reply, 6);
+        assert_eq!(got.len(), 6);
+        assert!(
+            !got.iter().any(|(i, _)| *i == 16),
+            "keys beyond the fitted count"
+        );
+        let three = parse_key_colors(&reply, 3);
+        assert_eq!(three.len(), 3);
+    }
+
+    #[test]
+    fn the_read_request_matches_the_write_framing() {
+        let r = read_key_colors();
+        assert_eq!(r[0], crate::protocol::PREFIX);
+        assert_eq!(r[1], 0x12);
+        assert_eq!(r[2], 3, "three bytes per colour, as `14` writes");
+    }
+
+    #[test]
+    fn every_key_colour_is_an_offset_triple_not_an_index_offset() {
+        // `14` writes at 3 * index. If `12` were read at a plain index offset the
+        // two would disagree, which is the bug this guards.
+        for index in [0u8, 1, 5, 13] {
+            let write = set_key_color(index, [1, 2, 3]).unwrap();
+            assert_eq!(write[3], index * 3, "write offset is 3 * index");
+        }
+    }
     use super::*;
 
     /// Real reply captured from the pad for command `0x0A` on 2026-10-09:

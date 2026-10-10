@@ -215,7 +215,7 @@ is rejected. So turning the lights on requires choosing a mode as well.
 | 2 | mode, 1-6 |
 | 3 | brightness, 0-4 (0 is off) |
 | 4 | speed |
-| 5 | direction |
+| 5 | direction; stored verbatim for every value tried (0-255), unlike mode |
 | 6 | colour/cycle flag (the vendor clears it when mode is 0) |
 | 7 | single-colour index; the vendor writes 0, the device reports 255 |
 | 8-10 | hue, saturation, value, each 0-255 |
@@ -233,6 +233,18 @@ value — which is exactly what a naive probe sees.
 Per-key colours are written with `14`, offset **`3 * key_index`** and length
 byte **3**, because colours are stored one RGB triple per key. A bare index
 offset writes to the wrong key.
+
+**Per-key colour has not been observed to work.** `14` is acknowledged, but
+neither model showed any visible change, measured by setting the global colour
+first and then writing a per-key colour on top: the pad kept the global colour
+throughout. `12`, the documented read counterpart, answers `aa 12 01` followed
+by all zeros for every length and offset tried, so there is no way to confirm a
+write either. `led key` therefore reports what it can prove and says plainly
+that it cannot confirm the rest.
+
+Do not assume `14` works because it returned success. The acknowledgement is
+the same one the firmware sends for records it discards — see the mode range
+above — so an acknowledgement is not evidence that anything was stored.
 
 Verified on hardware 2026-10-09: `minikbconfig led on --color '#00ccff'` lit
 the pad cyan at brightness 4, mode 2, and `led off` returned it to dark.

@@ -232,6 +232,17 @@ impl Pad {
         Ok(())
     }
 
+    /// Read every key's colour, one RGB triple per key.
+    ///
+    /// Exists so a per-key colour write can be attempted rather than assumed.
+    /// Measured on both models as returning all zeros, so a caller must treat an
+    /// all-black table as "no information", not as "every key is black".
+    pub fn key_colors(&self) -> anyhow::Result<Vec<(u8, [u8; 3])>> {
+        let report = light::read_key_colors();
+        let reply = self.exchange_bytes(&report, 0x12)?;
+        Ok(light::parse_key_colors(&reply, self.keys))
+    }
+
     /// Send a pre-built report and return the reply.
     ///
     /// The light commands do not fit the generic [`Request`] builder: their

@@ -47,7 +47,7 @@ LED OPTIONS (for `led on`):
     -m, --mode <1-6>        Effect mode. Modes outside 1-6 are discarded
     -c, --color <#RRGGBB>   Colour, e.g. --color '#00ff88'
         --speed <N>         Effect speed
-        --direction <0-3>   Effect direction
+        --direction <N>     Effect direction; stored verbatim, any 0-255
 
 OPTIONS:
     -l, --layer <N>         Layer to read or write (default 0)
@@ -583,7 +583,29 @@ fn cmd_led_key(args: &[String]) -> anyhow::Result<()> {
 
     let pad = Pad::open()?;
     pad.set_key_color(index, rgb)?;
-    println!("  key[{index:2}] colour set to {hex}");
+
+    // The `14` acknowledgement is worthless on its own: the firmware sends it
+    // for records it discards, the same way a mode-0 write is acknowledged and
+    // then vanishes. So confirm against `12` where possible, and say plainly
+    // when confirmation was not available rather than claiming success.
+    match pad.key_colors() {
+        Ok(table) => match table.iter().find(|(i, _)| *i == index) {
+            Some((_, stored)) if *stored == rgb => {
+                println!("  key[{index:2}] colour set to {hex}");
+                println!("  confirmed: the pad reports it back");
+            }
+            Some((_, stored)) => println!(
+                "  key[{index:2}] wrote {hex}, but the pad reports #{:02x}{:02x}{:02x} there",
+                stored[0], stored[1], stored[2]
+            ),
+            None => println!("  key[{index:2}] wrote {hex}; the pad returned no colour for it"),
+        },
+        Err(err) => println!("  key[{index:2}] wrote {hex}; could not read it back: {err:#}"),
+    }
+    println!(
+        "  note: per-key colour has not been observed to take effect on either model \
+         tested. The write is acknowledged, which is not proof it landed."
+    );
     Ok(())
 }
 
