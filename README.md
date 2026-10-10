@@ -159,8 +159,8 @@ These are measured on hardware, not assumptions — see
 - **Brightness has no effect on these models.** `brightness` 0 and 4 look
   identical. The byte is still written so state stays compatible with the vendor
   app, but do not expect it to do anything.
-- **The output does not dim.** `value` 0 is dark and anything above it is full
-  brightness.
+- **Brightness comes from the colour, not the brightness byte.** `value` 0 is
+  off and the 0-255 range is the actual dimming control.
 - **`direction` has no effect.** It is stored and echoed, and appears unused by
   the firmware.
 - **Per-key colour is only visible in effect mode 5.** In modes 1-4 every key is
