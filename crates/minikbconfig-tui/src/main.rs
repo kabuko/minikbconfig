@@ -22,8 +22,11 @@ USAGE:
 
 KEYS:
     up/down, j/k    move between slots
-    enter           edit the selected slot
+    enter           edit the selected slot (tab completes, arrows choose)
+    L               lighting panel
     r               re-read every slot from the pad
+    v               show or hide the live report pane
+    c               clear the report pane
     q, esc          quit
     esc             cancel an edit, or give up waiting for a confirmation
 

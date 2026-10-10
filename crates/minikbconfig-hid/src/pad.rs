@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use minikbconfig_core::{
-    Emitted, SUPPORTED,
+    Emitted,
     keymap::{self, CHUNK_KEYS, Command, KEY_SLOTS, KeyTable},
     light::{self, LightConfig},
     protocol::{REPORT_LEN, RESPONSE_PAYLOAD_OFFSET, Request, is_reply_to},
@@ -44,18 +44,20 @@ pub struct Pad {
 impl Pad {
     /// Find the single supported pad and open its configuration interface.
     pub fn open() -> anyhow::Result<Pad> {
+        // Collected before the search so a failure can say which interfaces were
+        // visible but unusable, rather than only that the search came up empty.
+        let visible: Vec<String> = device::enumerate_supported()
+            .unwrap_or_default()
+            .iter()
+            .map(device::describe_interface)
+            .collect();
         let interfaces = device::find_config_interfaces()?;
         match interfaces.len() {
             0 => {
-                let wanted: Vec<String> = SUPPORTED
-                    .iter()
-                    .map(|d| format!("{:04x}:{:04x}", d.vendor_id, d.product_id))
-                    .collect();
-                anyhow::bail!(
-                    "no supported pad found (looking for USB {}); \
-                     is it plugged in, and is the udev rule installed?",
-                    wanted.join(" or ")
-                )
+                // Count what actually opens, so the message can distinguish
+                // "forbidden" from "not there at all".
+                let opened = device::count_openable_supported();
+                anyhow::bail!("{}", crate::diagnose::diagnose(&visible, opened, None))
             }
             1 => Pad::open_interface(&interfaces[0]),
             n => anyhow::bail!("{n} pads found; expected 1. Disconnect the others and retry."),
@@ -352,10 +354,18 @@ impl Watcher {
     pub fn open() -> anyhow::Result<Watcher> {
         let interfaces = device::open_input_interfaces()?;
         if interfaces.is_empty() {
+            // Same three-way distinction as Pad::open: the pad's input
+            // interfaces are listed by the OS whether or not we may read them,
+            // so this is normally permissions rather than absence.
+            let visible: Vec<String> = device::enumerate_supported()
+                .unwrap_or_default()
+                .iter()
+                .map(device::describe_interface)
+                .collect();
+            let diagnosis = crate::diagnose::diagnose(&visible, 0, None);
             anyhow::bail!(
-                "found the pad but none of its input interfaces could be opened; \
-                 on Linux check the udev rule and that you are in the seat group"
-            );
+                "{diagnosis}\n\nThe slot list still works; only the live pane needs this."
+            )
         }
         Ok(Watcher { interfaces })
     }

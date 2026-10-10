@@ -10,9 +10,11 @@
 //! decoding — is in `minikbconfig-core`, which is pure and has no I/O.
 
 pub mod device;
+pub mod diagnose;
 pub mod pad;
 
 pub use device::{InputInterface, InputKind, find_config_interfaces};
+pub use diagnose::{Diagnosis, RULE_PATH, diagnose};
 pub use pad::{Pad, Watcher, describe};
 
 pub use minikbconfig_core::{DeviceId, SUPPORTED};

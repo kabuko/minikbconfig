@@ -45,6 +45,43 @@ pub fn open(info: &hidapi::DeviceInfo) -> anyhow::Result<hidapi::HidDevice> {
         .with_context(|| format!("open HID interface {}", info.path().to_string_lossy()))
 }
 
+/// Every supported interface hidapi lists, whether or not it can be opened.
+///
+/// This is the evidence for telling "no pad" apart from "pad, but forbidden":
+/// hidapi enumerates from sysfs and does not filter on permissions, so an
+/// interface it lists but we cannot open is a permission problem, not an absent
+/// device.
+pub fn enumerate_supported() -> anyhow::Result<Vec<hidapi::DeviceInfo>> {
+    let api = hidapi::HidApi::new().context("enumerate HID devices")?;
+    Ok(api
+        .device_list()
+        .filter(|i| is_supported(i))
+        .cloned()
+        .collect())
+}
+
+/// How many supported interfaces can actually be opened right now.
+///
+/// Zero with a non-empty enumeration is the permission case: the device is
+/// listed but the node refuses us.
+pub fn count_openable_supported() -> usize {
+    let Ok(api) = hidapi::HidApi::new() else {
+        return 0;
+    };
+    api.device_list()
+        .filter(|i| is_supported(i))
+        .filter(|i| api.open_path(i.path()).is_ok())
+        .count()
+}
+
+/// A readable description of one interface, for error messages.
+pub fn describe_interface(info: &hidapi::DeviceInfo) -> String {
+    let model = model_of(info)
+        .map(|m| format!("{:04x}:{:04x}", m.vendor_id, m.product_id))
+        .unwrap_or_else(|| format!("{:04x}:{:04x}", info.vendor_id(), info.product_id()));
+    format!("{} ({model})", info.path().to_string_lossy())
+}
+
 /// Every vendor configuration interface currently attached, one entry per pad.
 ///
 /// Entries are deduplicated by device path, because hidapi emits one
