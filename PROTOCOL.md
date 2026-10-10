@@ -224,6 +224,35 @@ Colour bytes come from `#RRGGBB` converted to HSV with hue in degrees and s/v
 as percentages, each then scaled by /360 or /100 into a byte. Because value is
 `max(r,g,b)`, it is simply the brightest channel.
 
+### Effect modes, measured
+
+Swept on the 6-key model by setting one mode at a time and watching the pad.
+Brightness, colour, speed and direction were held fixed; only the mode varied.
+
+| mode | observed |
+|---|---|
+| 1 | steady, all six keys lit |
+| 2 | slow pulse |
+| 3 | off |
+| 4 | fades between colours, **all six keys sharing one colour at a time** |
+| 5 | steady, most keys off |
+| 6 | not reproducible — one run showed keys 2/4/6 lit, a second showed all six |
+
+Mode 6 did not reproduce with identical settings, so it is not a stored
+per-key state or a deterministic mode effect. Treat a single observation of an
+unusual pattern as a transition artefact, not a protocol feature.
+
+**Mode 4 is a global fade, not a per-key pattern.** All six keys show the same
+colour and fade together. That matters for `direction`: with no spatial
+component there is nothing for it to control, so its apparent effect cannot be
+judged on mode 4. `speed` *is* verifiable there — speed 1 is a slow fade,
+speed 255 visibly faster — and is the only lighting parameter confirmed to
+affect anything beyond what is stored.
+
+Modes 5 and 6 leave some keys dark, so "brightness 3" in a read-back does not
+mean every key is lit. The record describes the global configuration, not the
+per-key result; the tool has no way to read which keys are dark.
+
 ### Colour is verified across the wheel
 
 Swept on the 6-key model by setting a colour and looking at the pad. Every
