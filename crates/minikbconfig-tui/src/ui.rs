@@ -329,7 +329,11 @@ fn lighting_panel(state: &LightingState, keys: u8) -> Paragraph<'static> {
     lines.push(Line::from(""));
     let status_summary = format!(
         "  Current state: {} (mode {}, brightness {}, hue {}, sat {}, val {})",
-        if state.config.is_lit() { "lit" } else { "dark" },
+        if state.config.colour_is_black() {
+            "black"
+        } else {
+            "showing colour"
+        },
         state.config.mode,
         state.config.brightness,
         state.config.hue,

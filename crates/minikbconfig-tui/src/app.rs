@@ -7,7 +7,7 @@ use minikbconfig_core::emitted::{Emitted, Match};
 use minikbconfig_core::keymap::{
     KEY_SLOTS, KeyCode as HidKeyCode, KeyTable, KeyType, control_name,
 };
-use minikbconfig_core::light::{self, LightConfig, MAX_MODE, MIN_MODE};
+use minikbconfig_core::light::{self, LightConfig, MAX_MODE, MAX_SPEED, MIN_MODE};
 use minikbconfig_hid::pad::{Pad, Report, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
@@ -853,7 +853,7 @@ pub fn handle_lighting_key(
                 LightingAction::WriteGlobal(state.config)
             }
             LightingField::Speed => {
-                state.config.speed = state.config.speed.saturating_add(1);
+                state.config.speed = state.config.speed.saturating_add(1).min(MAX_SPEED);
                 LightingAction::WriteGlobal(state.config)
             }
             LightingField::Direction => {
@@ -1265,6 +1265,23 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn speed_never_exceeds_the_vendor_range() {
+        // The vendor slider is 0-4. Speeds above are stored but erratic, so the
+        // increment must stop at the top rather than run to 255.
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.config.mode = PER_KEY_MODE;
+        state.field = LightingField::Speed;
+        for _ in 0..40 {
+            handle_lighting_key(&mut state, 6, KeyCode::Right);
+        }
+        assert_eq!(state.config.speed, MAX_SPEED);
+        for _ in 0..40 {
+            handle_lighting_key(&mut state, 6, KeyCode::Left);
+        }
+        assert_eq!(state.config.speed, 0, "must not underflow");
+    }
+
     fn changing_mode_from_the_mode_field_keeps_the_selection_visible() {
         let mut state = LightingState::new(LightConfig::OFF, 6);
         state.config.mode = 1;

@@ -33,6 +33,13 @@ pub const MIN_MODE: u8 = 1;
 /// Highest effect mode the firmware accepts.
 pub const MAX_MODE: u8 = 6;
 
+/// Highest effect speed the firmware documents.
+///
+/// The vendor's own light panel declares `min: 0, max: 4` on both the speed and
+/// brightness sliders. Speeds above 4 are stored verbatim but behave erratically:
+/// speed 5 fades over ~7s on mode 3, slower than any supported value.
+pub const MAX_SPEED: u8 = 4;
+
 /// Report byte the light configuration starts at, in both directions.
 ///
 /// Matches the device-config (`05`) reply, which also answers at 5 rather
@@ -118,12 +125,22 @@ impl LightConfig {
         ]
     }
 
-    /// True if this configuration should actually light anything.
+    /// What the *record* implies about whether the pad will show colour.
     ///
-    /// Both brightness and value have to be non-zero: a black colour has
-    /// `value == 0`, so a bright setting with a black colour is still dark.
-    pub fn is_lit(self) -> bool {
-        self.brightness > 0 && self.value > 0
+    /// **This is a prediction about these bytes, not an observation of the
+    /// device.** It cannot be one: the protocol has no lighting read-back beyond
+    /// the stored record itself.
+    ///
+    /// Measured on the 6-key model, `brightness` has **no observable effect** in
+    /// any mode - 0 and 4 look identical. Darkness comes from `value == 0`, a
+    /// black colour, which is also why `led off` works even though it sets
+    /// brightness as well.
+    ///
+    /// So this returns false only for a genuinely black colour. Brightness is
+    /// deliberately *not* consulted: doing so reported "dark" for a saturated
+    /// green at brightness 0, which was visibly lit.
+    pub fn colour_is_black(self) -> bool {
+        self.value == 0
     }
 
     /// True if the brightness is within the 0-4 range the vendor UI uses.
@@ -412,7 +429,7 @@ mod tests {
         let config = LightConfig::parse(&REAL_LIGHT_REPLY).unwrap();
         assert_eq!(config.light_type, 1, "type lives at offset 5");
         assert_eq!(config.brightness, 0, "this pad is unlit");
-        assert!(!config.is_lit());
+        assert!(config.colour_is_black(), "an unlit pad has a black colour");
         // The tempting wrong offset yields a featureless config.
         let mut wrong = REAL_LIGHT_REPLY;
         wrong[5] = 0;
@@ -494,8 +511,9 @@ mod tests {
     }
 
     #[test]
-    fn a_black_colour_is_dark_however_bright() {
-        // Guards the trap that made an earlier probe light nothing.
+    fn only_a_black_colour_counts_as_unlit() {
+        // Guards the trap that made an earlier probe light nothing: a black
+        // colour lights nothing at any brightness setting.
         let black = LightConfig {
             brightness: 4,
             hue: 0,
@@ -503,19 +521,26 @@ mod tests {
             value: 0,
             ..LightConfig::OFF
         };
-        assert!(!black.is_lit(), "value 0 means nothing to light");
+        assert!(black.colour_is_black(), "value 0 means nothing to light");
         let red = LightConfig {
             brightness: 4,
             value: 255,
             ..LightConfig::OFF
         };
-        assert!(red.is_lit());
-        let bright_black = LightConfig {
+        assert!(!red.colour_is_black());
+
+        // brightness 0 with a real colour is NOT dark. Measured on the 6-key
+        // model: brightness has no observable effect at all, and the tool used
+        // to report this as dark while the pad was plainly lit.
+        let dim_brightness = LightConfig {
             brightness: 0,
             value: 255,
             ..LightConfig::OFF
         };
-        assert!(!bright_black.is_lit(), "brightness 0 is off");
+        assert!(
+            !dim_brightness.colour_is_black(),
+            "brightness 0 must not be read as darkness"
+        );
     }
 
     #[test]

@@ -46,7 +46,7 @@ LED OPTIONS (for `led on`):
     -b, --brightness <0-4>  Brightness; 0 is off
     -m, --mode <1-6>        Effect mode. Modes outside 1-6 are discarded
     -c, --color <#RRGGBB>   Colour, e.g. --color '#00ff88'
-        --speed <N>         Effect speed
+        --speed <N>         Effect speed, 0-4 as the vendor app offers
         --direction <N>     Effect direction; stored verbatim, any 0-255
 
 OPTIONS:
@@ -510,7 +510,18 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
                 }
                 "--mode" => mode = Some(value(i)?.parse().context("mode must be a number")?),
                 "--color" => colour = Some(value(i)?),
-                "--speed" => speed = Some(value(i)?.parse().context("speed must be a number")?),
+                "--speed" => {
+                    let parsed: u8 = value(i)?.parse().context("speed must be a number")?;
+                    if parsed > light::MAX_SPEED {
+                        anyhow::bail!(
+                            "speed must be 0-{max}, the range the vendor app offers; higher \
+                             values are stored but behave erratically (speed 5 fades slower \
+                             on mode 3 than any supported value)",
+                            max = light::MAX_SPEED
+                        );
+                    }
+                    speed = Some(parsed)
+                }
                 "--direction" => {
                     direction = Some(value(i)?.parse().context("direction must be 0-3")?)
                 }
@@ -567,7 +578,7 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
     if config.mode == 0 {
         config.cycle = 0; // the vendor clears `color` when mode is 0
     }
-    if config.is_lit() {
+    if !config.colour_is_black() {
         config.cycle = 1;
     }
     if let Some(hex) = &colour {
@@ -597,8 +608,8 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
         "\n  stored: ok (brightness {}, value {})",
         stored.brightness, stored.value
     );
-    if !stored.is_lit() && config.is_lit() {
-        println!("  note: the pad reports this as dark — check the LEDs are present");
+    if stored.colour_is_black() && !config.colour_is_black() {
+        println!("  note: the colour came back black, so the pad will show nothing");
     }
     Ok(())
 }
@@ -617,7 +628,11 @@ fn print_light(config: &LightConfig) {
         config.hue,
         config.saturation,
         config.value,
-        if config.is_lit() { "lit" } else { "dark" }
+        if config.colour_is_black() {
+            "black"
+        } else {
+            "showing colour"
+        }
     );
 }
 

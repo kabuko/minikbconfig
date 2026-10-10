@@ -213,7 +213,7 @@ is rejected. So turning the lights on requires choosing a mode as well.
 | 0 | type (the vendor always writes 1) |
 | 1 | unused |
 | 2 | mode, 1-6 |
-| 3 | brightness, 0-4 (0 is off) |
+| 3 | brightness, 0-4 in the vendor UI — **stored but inert, see below** |
 | 4 | speed |
 | 5 | direction; stored verbatim for every value tried (0-255), unlike mode |
 | 6 | colour/cycle flag (the vendor clears it when mode is 0) |
@@ -281,6 +281,38 @@ result rather than a failed experiment: there is no mode on which direction
 could act, so the sweep could not have succeeded.
 
 `brightness` applies to modes 1-5 and is enforced 0-4 by the tool.
+
+### Brightness has no observable effect
+
+The vendor's light panel declares `light-setting min: 0, max: 4`, written raw
+with no transformation — byte-for-byte what we write. But on the 6-key model
+**brightness 0 and brightness 4 look identical**, in every mode tried.
+
+Darkness comes from the *colour*, not brightness. Setting brightness 4 with a
+black colour (`value` 0) turns the lights off; setting brightness 0 with a
+saturated green leaves them plainly lit. So:
+
+| byte | effect |
+|---|---|
+| `value` (colour) | gates output — 0 is dark, 255 is full |
+| `brightness` | **none observed** |
+| `direction` | **none observed** |
+| `speed` | real: mode 3 fade, mode 4 rate |
+
+`led off` works because it zeroes the colour *and* sets brightness; only the
+colour part matters.
+
+Two of the four fields the light record carries are inert on this firmware, and
+both are exposed as primary controls in the vendor app. Whether this pad simply
+ignores them or drives output from HSV `value` alone is not established — the
+test that would separate them (a mid-range `value` such as 64, checking for
+visible dimming) is outstanding.
+
+The tool's own `is_lit()` was wrong because of this: it computed
+`brightness > 0 && value > 0` and so reported "dark" for a lit green at
+brightness 0. It is now `colour_is_black()`, which consults `value` only and is
+explicitly documented as a prediction about the stored record rather than an
+observation of the device.
 
 ### Speed is not a rate
 
