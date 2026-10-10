@@ -304,13 +304,33 @@ between 4 and 5**, and 255 behaving like 1. Higher speed does not mean faster
 fade, and speed 4 — which looks like the *fastest* setting — is the only one that
 does not fade at all.
 
-Two candidate mechanisms, **neither confirmed**:
+**The reason is that the supported range is 0-4.** The vendor's own light panel
+declares its speed slider `min: 0, max: 4` — identical to the brightness slider
+beside it. Everything above 4 is outside the range the product documents, and
+almost the entire sweep (5, 100, 255) was spent there.
 
-- **Discrete values, not a scale.** The 4-to-5 jump is abrupt enough that 4 and
-  5 may select different behaviour rather than different rates.
-- **Signed byte.** 255 behaving identically to 1 is what a firmware reading the
-  byte as signed would produce, since 255 is -1. That would explain the match but
-  not the 4-to-5 cliff.
+So the shape is not a curve with a peak. Within the supported range it behaves
+sensibly:
+
+| speed | behaviour | in range |
+|---|---|---|
+| 1 | fades ~1s | ✓ |
+| 2 | fades ~1s | ✓ |
+| 3 | fades <1s | ✓ |
+| 4 | no fade, lit only while held | ✓ |
+| 5 | fades ~7s | out of range |
+| 100 | fades ~1.5s | out of range |
+| 255 | fades ~1s | out of range |
+
+Speed 4 being the fastest and 5 the slowest is the discontinuity, and it sits
+exactly at the boundary of the documented range. Whether the firmware does
+something deliberate past 4 or simply wraps is not established; the earlier
+"signed byte" idea for why 255 matched 1 remains a guess and is no longer
+needed to explain the data.
+
+The practical guidance is unchanged and now better grounded: **stay in 0-4, and
+do not assume a higher speed fades faster** — within the supported range that is
+true, and the fastest setting (4) does not fade at all.
 
 Measurements are single presses with brightness, colour, mode and direction
 pinned; the ~7s at speed 5 was reproduced twice hours apart. Treat the shape as
