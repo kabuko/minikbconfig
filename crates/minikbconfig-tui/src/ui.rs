@@ -226,14 +226,16 @@ fn lighting_panel(state: &LightingState, keys: u8) -> Paragraph<'static> {
     lines.push(field_line(LightingField::Brightness, "Brightness", b_str));
 
     // Mode 1-6
+    // Names from the vendor's per-device config, not invented. Mode 5 is
+    // "custom" and is the per-key view; calling it "spectrum" actively hides
+    // where per-key colour lives. Mode 6 is not a supported mode at all.
     let mode_desc = match state.config.mode {
-        1 => "1 (solid / custom)",
-        2 => "2 (breathing)",
-        3 => "3 (wave)",
-        4 => "4 (ripple)",
-        5 => "5 (spectrum)",
-        6 => "6 (reactive)",
-        _other => "invalid",
+        1 => "1 (steady)",
+        2 => "2 (breathe)",
+        3 => "3 (press: lit while held)",
+        4 => "4 (tide)",
+        5 => "5 (custom: per-key colour)",
+        _other => "not a supported mode",
     };
     let m_str = format!("{}  [{}]", state.config.mode, mode_desc);
     lines.push(field_line(LightingField::Mode, "Effect Mode", m_str));
@@ -277,36 +279,52 @@ fn lighting_panel(state: &LightingState, keys: u8) -> Paragraph<'static> {
         global_color_str,
     ));
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  --- Per-Key Backlight Colour ---",
-        Style::default().add_modifier(Modifier::DIM),
-    )));
+    // Per-key colour is only shown in the mode that displays it. In modes 1-4
+    // every key is painted with the global colour, so a per-key write is
+    // invisible - it looks like the write failed, which is exactly the
+    // misreading that cost us an afternoon.
+    if state.config.mode == crate::app::PER_KEY_MODE {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  --- Per-Key Backlight Colour ---",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
 
-    let target_key_name =
-        minikbconfig_core::keymap::control_name(state.target_key, keys).unwrap_or("unknown");
-    lines.push(field_line(
-        LightingField::TargetKey,
-        "Target Key",
-        format!("{} ({})", state.target_key, target_key_name),
-    ));
+        let target_key_name =
+            minikbconfig_core::keymap::control_name(state.target_key, keys).unwrap_or("unknown");
+        lines.push(field_line(
+            LightingField::TargetKey,
+            "Target Key",
+            format!("{} ({})", state.target_key, target_key_name),
+        ));
 
-    let key_rgb = state.current_key_rgb();
-    let key_color_str = if !state.key_hex_input.is_empty() {
-        format!("{:<7} (custom hex)", state.key_hex_input)
+        let key_rgb = state.current_key_rgb();
+        let key_color_str = if !state.key_hex_input.is_empty() {
+            format!("{:<7} (custom hex)", state.key_hex_input)
+        } else {
+            let preset_name =
+                crate::app::COLOR_PRESETS[state.key_preset_idx % crate::app::COLOR_PRESETS.len()].0;
+            format!(
+                "#{:02x}{:02x}{:02x} ({})",
+                key_rgb[0], key_rgb[1], key_rgb[2], preset_name
+            )
+        };
+        lines.push(field_line(
+            LightingField::KeyColor,
+            "Key Colour",
+            key_color_str,
+        ));
     } else {
-        let preset_name =
-            crate::app::COLOR_PRESETS[state.key_preset_idx % crate::app::COLOR_PRESETS.len()].0;
-        format!(
-            "#{:02x}{:02x}{:02x} ({})",
-            key_rgb[0], key_rgb[1], key_rgb[2], preset_name
-        )
-    };
-    lines.push(field_line(
-        LightingField::KeyColor,
-        "Key Colour",
-        key_color_str,
-    ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  per-key colour: mode {} only (currently {})",
+                crate::app::PER_KEY_MODE,
+                state.config.mode
+            ),
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+    }
 
     lines.push(Line::from(""));
     let status_summary = format!(

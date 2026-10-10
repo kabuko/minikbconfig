@@ -818,11 +818,10 @@ fn cmd_apply(args: &[String]) -> anyhow::Result<()> {
         }
     };
 
-    if plan.is_empty() {
-        if light_change.as_ref().is_some_and(|(_, d)| d.is_empty()) {
-            println!("    no changes");
-            return Ok(());
-        }
+    let lighting_settled = light_change.as_ref().is_some_and(|(_, d)| d.is_empty());
+    if plan.is_empty() && lighting_settled {
+        println!("    no changes");
+        return Ok(());
     }
 
     // Every change is shown before any is written, including the slots the file

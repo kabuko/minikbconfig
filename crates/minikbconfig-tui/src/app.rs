@@ -139,6 +139,10 @@ impl App {
                     LightingAction::WriteGlobal(cfg) => match self.pad.set_light_config(cfg) {
                         Ok(stored) => {
                             state.config = stored;
+                            // The device decides what was actually stored, so
+                            // the mode can differ from the one requested - and
+                            // that can hide the per-key fields.
+                            state.clamp_field_to_mode();
                             self.status = Status::Ready;
                         }
                         Err(err) => {
@@ -579,31 +583,37 @@ pub enum LightingField {
     KeyColor,
 }
 
+/// Whether the current mode displays stored per-key colours.
+///
+/// Only mode 5 does. Measured on the 6-key model: in modes 1 to 4 every key is
+/// painted with the *global* colour and a per-key write is invisible, which
+/// looks exactly like the write having failed. Mode 0 is off. So the per-key
+/// controls are only meaningful in mode 5, and showing them elsewhere invites
+/// the user to write a colour that provably does nothing.
+///
+/// The vendor calls mode 5 "custom"; it is the per-key view.
+pub const PER_KEY_MODE: u8 = 5;
+
 impl LightingField {
-    pub const ALL: [LightingField; 7] = [
+    /// Fields available in every mode.
+    pub const GLOBAL: [LightingField; 5] = [
         LightingField::Brightness,
         LightingField::Mode,
         LightingField::Speed,
         LightingField::Direction,
         LightingField::GlobalColor,
-        LightingField::TargetKey,
-        LightingField::KeyColor,
     ];
 
-    pub fn index(self) -> usize {
-        match self {
-            Self::Brightness => 0,
-            Self::Mode => 1,
-            Self::Speed => 2,
-            Self::Direction => 3,
-            Self::GlobalColor => 4,
-            Self::TargetKey => 5,
-            Self::KeyColor => 6,
-        }
-    }
+    /// Fields that only mean something when per-key colour is displayed.
+    pub const PER_KEY: [LightingField; 2] = [LightingField::TargetKey, LightingField::KeyColor];
 
-    pub fn from_index(i: usize) -> Self {
-        Self::ALL[i % Self::ALL.len()]
+    /// The fields to cycle through, given the current mode.
+    pub fn for_mode(mode: u8) -> Vec<LightingField> {
+        let mut out = Self::GLOBAL.to_vec();
+        if mode == PER_KEY_MODE {
+            out.extend_from_slice(&Self::PER_KEY);
+        }
+        out
     }
 }
 
@@ -620,6 +630,18 @@ pub struct LightingState {
 }
 
 impl LightingState {
+    /// Move the selection off a field the current mode does not show.
+    ///
+    /// Needed because the mode can change without the user navigating to the
+    /// mode field: `r` re-reads the pad, and so does any write. Leaving the
+    /// cursor on a hidden per-key field would strand it, since the field list
+    /// is mode-dependent.
+    pub fn clamp_field_to_mode(&mut self) {
+        if !LightingField::for_mode(self.config.mode).contains(&self.field) {
+            self.field = LightingField::GlobalColor;
+        }
+    }
+
     pub fn new(config: LightConfig, _keys: u8) -> Self {
         LightingState {
             config,
@@ -671,17 +693,15 @@ pub fn handle_lighting_key(
         KeyCode::Esc => LightingAction::Exit,
         KeyCode::Char('q') | KeyCode::Char('Q') => LightingAction::Quit,
         KeyCode::Down | KeyCode::Char('j') => {
-            let next = (state.field.index() + 1) % LightingField::ALL.len();
-            state.field = LightingField::from_index(next);
+            let fields = LightingField::for_mode(state.config.mode);
+            let at = fields.iter().position(|f| *f == state.field).unwrap_or(0);
+            state.field = fields[(at + 1) % fields.len()];
             LightingAction::None
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            let prev = if state.field.index() == 0 {
-                LightingField::ALL.len() - 1
-            } else {
-                state.field.index() - 1
-            };
-            state.field = LightingField::from_index(prev);
+            let fields = LightingField::for_mode(state.config.mode);
+            let at = fields.iter().position(|f| *f == state.field).unwrap_or(0);
+            state.field = fields[(at + fields.len() - 1) % fields.len()];
             LightingAction::None
         }
         KeyCode::Char(c @ '0'..='9') => {
@@ -690,6 +710,7 @@ pub fn handle_lighting_key(
                 LightingField::Mode => {
                     if (MIN_MODE..=MAX_MODE).contains(&digit) {
                         state.config.mode = digit;
+                        state.clamp_field_to_mode();
                         LightingAction::WriteGlobal(state.config)
                     } else {
                         LightingAction::Refused(format!(
@@ -1179,6 +1200,78 @@ mod tests {
             }
             other => panic!("expected WriteKeyColor, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn per_key_fields_are_only_reachable_in_the_mode_that_shows_them() {
+        // Modes 1-4 paint every key with the global colour, so a per-key write
+        // is invisible there - it reads as a failed write. The controls must not
+        // be offered, or navigable, in those modes.
+        for mode in 1..=4 {
+            let fields = LightingField::for_mode(mode);
+            assert!(
+                !fields.contains(&LightingField::TargetKey),
+                "mode {mode} does not show per-key colour"
+            );
+            assert!(!fields.contains(&LightingField::KeyColor), "mode {mode}");
+        }
+        let custom = LightingField::for_mode(PER_KEY_MODE);
+        assert!(custom.contains(&LightingField::TargetKey));
+        assert!(custom.contains(&LightingField::KeyColor));
+        // Every mode still gets the global controls.
+        for mode in 1..=6 {
+            for f in LightingField::GLOBAL {
+                assert!(LightingField::for_mode(mode).contains(&f), "mode {mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn navigation_never_lands_on_a_hidden_per_key_field() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.config.mode = 2;
+        state.field = LightingField::Brightness;
+        for _ in 0..12 {
+            handle_lighting_key(&mut state, 6, KeyCode::Down);
+            assert!(!LightingField::PER_KEY.contains(&state.field));
+        }
+        // In mode 5 the same walk reaches them.
+        let mut custom = LightingState::new(LightConfig::OFF, 6);
+        custom.config.mode = PER_KEY_MODE;
+        custom.field = LightingField::GlobalColor;
+        let mut seen = false;
+        for _ in 0..6 {
+            handle_lighting_key(&mut custom, 6, KeyCode::Down);
+            if LightingField::PER_KEY.contains(&custom.field) {
+                seen = true;
+            }
+        }
+        assert!(seen, "mode 5 should make the per-key fields reachable");
+    }
+
+    #[test]
+    fn a_refresh_that_changes_mode_clamps_the_selection() {
+        // The mode can change without the user visiting the mode field, since
+        // `r` re-reads the pad. The cursor must not be left on a hidden field.
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.config.mode = PER_KEY_MODE;
+        state.field = LightingField::KeyColor;
+        assert!(LightingField::for_mode(state.config.mode).contains(&state.field));
+
+        state.config.mode = 2; // as if the pad were changed elsewhere
+        state.clamp_field_to_mode();
+        assert!(!LightingField::PER_KEY.contains(&state.field));
+        assert!(LightingField::for_mode(state.config.mode).contains(&state.field));
+    }
+
+    #[test]
+    fn changing_mode_from_the_mode_field_keeps_the_selection_visible() {
+        let mut state = LightingState::new(LightConfig::OFF, 6);
+        state.config.mode = 1;
+        state.field = LightingField::Mode;
+        handle_lighting_key(&mut state, 6, KeyCode::Char('5'));
+        assert_eq!(state.config.mode, PER_KEY_MODE);
+        assert_eq!(state.field, LightingField::Mode);
     }
 
     #[test]
