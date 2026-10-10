@@ -1265,7 +1265,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn speed_never_exceeds_the_vendor_range() {
         // The vendor slider is 0-4. Speeds above are stored but erratic, so the
         // increment must stop at the top rather than run to 255.
@@ -1282,6 +1281,7 @@ mod tests {
         assert_eq!(state.config.speed, 0, "must not underflow");
     }
 
+    #[test]
     fn changing_mode_from_the_mode_field_keeps_the_selection_visible() {
         let mut state = LightingState::new(LightConfig::OFF, 6);
         state.config.mode = 1;
