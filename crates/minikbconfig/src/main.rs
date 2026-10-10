@@ -89,7 +89,15 @@ fn main() -> std::process::ExitCode {
 
 fn run() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() || matches!(args[0].as_str(), "-h" | "--help" | "help") {
+    // Help is a global flag, so honour it wherever it appears. Previously only
+    // args[0] was checked, which meant `minikbconfig set --help` reported a
+    // usage error instead of help - the one place someone is likely to ask for
+    // it.
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|a| matches!(a.as_str(), "-h" | "--help" | "help"))
+    {
         print!("{USAGE}");
         return Ok(());
     }
@@ -100,7 +108,13 @@ fn run() -> anyhow::Result<()> {
 
     let command = args[0].clone();
     let rest = &args[1..];
-    check_flags(&command, rest)?;
+    if let Err(err) = check_flags(&command, rest) {
+        // Name the command whose flags were rejected; `apply --verify` is far
+        // more use than the full usage text.
+        eprintln!("error: {err}");
+        eprint!("{}", usage_for(&command));
+        std::process::exit(2);
+    }
     let layer = parse_layer_flag(rest)?;
 
     match command.as_str() {
@@ -173,6 +187,24 @@ const COMMAND_FLAGS: &[(&str, &[&str])] = &[
     ("watch", &["--raw", "-R"]),
     ("completions", &[]),
 ];
+
+/// A one-line usage hint for one command.
+fn usage_for(command: &str) -> String {
+    let line = match command {
+        "info" => "minikbconfig info",
+        "dump" => "minikbconfig dump",
+        "keys" | "keys-list" => "minikbconfig keys",
+        "set" => "minikbconfig set <INDEX> <ACTION>",
+        "led" => "minikbconfig led [on|off] | led key <INDEX> <#RRGGBB>",
+        "snapshot" => "minikbconfig snapshot <FILE>",
+        "apply" => "minikbconfig apply <FILE> [--dry-run] [--yes]",
+        "profile" => "minikbconfig profile [N]",
+        "watch" => "minikbconfig watch [SECONDS]",
+        "completions" => "minikbconfig completions <bash|zsh|fish>",
+        other => return format!("\nunknown command '{other}'\n"),
+    };
+    format!("\nusage: {line}\n")
+}
 
 /// Every flag the tool knows, for the help-text consistency checks.
 #[cfg(test)]
@@ -994,6 +1026,19 @@ mod flag_tests {
 
     fn flags(args: &[&str]) -> Vec<String> {
         args.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn every_command_has_a_usage_line() {
+        for (command, _) in COMMAND_FLAGS {
+            let usage = usage_for(command);
+            assert!(usage.starts_with("\nusage: "), "{command}: {usage:?}");
+            assert!(
+                usage.contains(*command) || *command == "keys-list",
+                "{command} has no usage line, got {usage:?}"
+            );
+        }
+        assert!(usage_for("nope").contains("unknown command"));
     }
 
     #[test]
