@@ -256,11 +256,24 @@ alternating darkness — which is exactly what it looked like before the rainbow
 existed.
 
 **Mode 4 is a global fade, not a per-key pattern.** All six keys show the same
-colour and fade together. That matters for `direction`: with no spatial
-component there is nothing for it to control, so its apparent effect cannot be
-judged on mode 4. `speed` *is* verifiable there — speed 1 is a slow fade,
-speed 255 visibly faster — and is the only lighting parameter confirmed to
-affect anything beyond what is stored.
+colour and fade together. `speed` *is* verifiable there — speed 1 is a slow
+fade, speed 255 visibly faster — and it is the only lighting parameter
+confirmed to affect anything beyond what is stored.
+
+**Mode 6 is static**, and that settles `direction`. It alternates fixed keys
+with no animation, so there is no phase to reverse and no motion to steer.
+Swept direction 0 through 4 on mode 6, the only mode with a spatial pattern:
+the lit keys never changed. `direction` is stored verbatim for any value and has
+**never been observed to affect anything** on this firmware.
+
+That the original `0-3` range was probably read off the vendor UI rather than
+measured — worth remembering as a caution about inherited numbers. Like mode 0
+versus the firmware's real mode range, an unenforced range in documentation is
+not evidence of one.
+
+The remaining parameter, `brightness`, was swept 0-4 and is enforced by the tool.
+Whether the dark half of mode 6 is truly dark or merely dimmer was not
+measured.
 
 Modes 5 and 6 can leave some keys dark, so "brightness 3" in a read-back does
 not mean every key is lit. The record describes the global configuration, not
