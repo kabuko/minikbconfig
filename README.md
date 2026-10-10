@@ -159,12 +159,16 @@ These are measured on hardware, not assumptions — see
 - **Brightness has no effect on these models.** `brightness` 0 and 4 look
   identical. The byte is still written so state stays compatible with the vendor
   app, but do not expect it to do anything.
-- **Brightness comes from the colour, not the brightness byte.** `value` 0 is
-  off and the 0-255 range is the actual dimming control.
+- **Brightness comes from the colour, not the brightness byte.** The light
+  record stores **HSV**, and its `value` — which is `max(r,g,b)` — is the actual
+  dimming control: 0 is off, 0-255 is the brightness range. The separate
+  `brightness` byte does nothing. Note per-key colour is stored as **raw RGB**,
+  not HSV.
 - **`direction` has no effect.** It is stored and echoed, and appears unused by
   the firmware.
-- **Mode 3 sticks lit for dark colours.** A `value` of 1-31 leaves the LED on
-  and never fades. 32 and above are fine. Nothing on the pad indicates a problem.
+- **Mode 3 sticks lit for dark colours.** An HSV `value` of 1-31 leaves the LED
+  on and never fades. 32 and above are fine, and no other mode is affected.
+  Nothing on the pad indicates a problem; `led` warns before writing it.
 - **Per-key colour is only visible in effect mode 5.** In modes 1-4 every key is
   painted with the global colour, so a per-key write lands and is invisible.
 - **Per-key colour cannot be verified.** There is no read for it; command `12`

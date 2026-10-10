@@ -334,6 +334,45 @@ brightness 0. It is now `colour_is_black()`, which consults `value` only and is
 explicitly documented as a prediction about the stored record rather than an
 observation of the device.
 
+### Three different "brightness" fields — do not conflate them
+
+The lighting record carries three things that all read as brightness, and only
+one of them does anything. Confusing them makes the findings above look
+contradictory.
+
+| field | record byte | stored as | effect |
+|---|---|---|---|
+| **`value`** | 10 | 0-255, **HSV value** | **the real brightness control** |
+| `brightness` | 3 | 0-4 raw | **inert** on this model |
+| per-key colour | —, command `14` | **raw RGB triple** | shown in mode 5 |
+
+**The protocol stores HSV, not RGB.** `#RRGGBB` is converted client-side;
+`hex_to_hsv` mirrors the vendor's own `HW()` helper — hue in degrees and s/v as
+percentages, each scaled into a byte. The pad never sees RGB on this path.
+
+Because HSV `value` is `max(r, g, b)`, it is literally the brightest channel:
+
+| colour | RGB | HSV bytes written |
+|---|---|---|
+| `#1f0000` | (31, 0, 0) | hue 0, sat 255, **value 31** |
+| `#200000` | (32, 0, 0) | hue 0, sat 255, **value 32** |
+| `#404040` | (64, 64, 64) | hue 0, sat 0, **value 64** |
+
+So "`#1f0000`" and "value 31" name the same thing by definition, not by
+coincidence — which is why the two are used interchangeably above.
+
+**The same hex written two ways is not the same bytes:**
+
+```
+minikbconfig led on  --color '#1f0000'   ->  HSV (0, 255, 31)
+minikbconfig led key 0 '#1f0000'        ->  RGB (31, 0, 0)
+```
+
+Per-key colour bypasses HSV entirely. A practical consequence: **the mode 3
+stick-lit bug cannot be triggered by a per-key write**, because it keys off the
+HSV value and per-key has no HSV. Binding the colour per-key and using mode 5
+is a workaround for a dark colour.
+
 ### Firmware bug: mode 3 sticks lit below value 32
 
 On mode 3, a colour with `value` in **1..=31 leaves the LED lit and never fades
@@ -363,6 +402,9 @@ was meaningless.
 **Silent, with no diagnostic.** The pad gives no indication anything is wrong,
 and the vendor app would not show one either. A user who picks a dark colour
 gets a pad that stays on and cannot be corrected from the UI.
+
+`led` warns before writing this combination rather than refusing, since the pad
+does accept the record and the colour is fine for every other mode.
 
 Not yet established: whether mode 2 (breathe, also a fading mode) is affected,
 and whether the vendor's own colour picker can select a value below 32 at all.

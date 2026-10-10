@@ -632,6 +632,7 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
         println!("  no changes");
         return Ok(());
     }
+    warn_if_sticks_lit(&config);
     println!("  ->");
     print_light(&config);
 
@@ -646,13 +647,34 @@ fn cmd_led(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Warn about the mode 3 firmware bug before writing it, not after.
+///
+/// A warn rather than a refusal: the pad does accept the record, so refusing
+/// would block a colour a user may legitimately want for other modes. Only mode
+/// 3 is affected, and it fails silently - the pad gives no indication - so the
+/// user has to be told here or not at all.
+fn would_stick_lit(config: &LightConfig) -> bool {
+    config.mode == 3 && !config.colour_is_black() && config.value < 32
+}
+
+fn warn_if_sticks_lit(config: &LightConfig) {
+    if would_stick_lit(config) {
+        println!(
+            "  warning: mode 3 with value {} (below 32) leaves the LED stuck lit and never \
+             fades - a firmware bug, not a mistake in the setting.\n           Any value 32 or \
+             above is fine, and modes other than 3 are unaffected.",
+            config.value
+        );
+    }
+}
+
 fn print_light(config: &LightConfig) {
     println!(
         "  type {}  single-colour index {}",
         config.light_type, config.single_color_index
     );
     println!(
-        "  brightness {}  mode {}  speed {}  direction {}  cycle {}",
+        "  brightness {} (no effect)  mode {}  speed {}  direction {} (no effect)  cycle {}",
         config.brightness, config.mode, config.speed, config.direction, config.cycle
     );
     println!(
@@ -1026,6 +1048,42 @@ mod flag_tests {
 
     fn flags(args: &[&str]) -> Vec<String> {
         args.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn the_stuck_lit_warning_covers_exactly_the_buggy_combination() {
+        // Mode 3 with a real colour below value 32 is the firmware bug. A warn
+        // rather than a refusal: the pad accepts the record, so refusing would
+        // block a colour that is fine for every other mode.
+        let mut c = LightConfig::OFF;
+        c.mode = 3;
+        c.value = 31;
+        assert!(
+            would_stick_lit(&c),
+            "mode 3, value 31 is the reported failure"
+        );
+
+        c.value = 32;
+        assert!(!would_stick_lit(&c), "32 is the working boundary");
+
+        c.value = 1;
+        assert!(would_stick_lit(&c), "the range reaches the bottom");
+
+        // Other modes are unaffected.
+        c.mode = 1;
+        c.value = 1;
+        assert!(!would_stick_lit(&c));
+        c.mode = 2;
+        assert!(!would_stick_lit(&c));
+        c.mode = 4;
+        assert!(!would_stick_lit(&c));
+        c.mode = 5;
+        assert!(!would_stick_lit(&c));
+
+        // A black colour is off, not stuck, so it is not the same failure.
+        c.mode = 3;
+        c.value = 0;
+        assert!(!would_stick_lit(&c), "nothing to light is not stuck lit");
     }
 
     #[test]
