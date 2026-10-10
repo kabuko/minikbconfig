@@ -218,7 +218,7 @@ is rejected. So turning the lights on requires choosing a mode as well.
 | 5 | direction; stored verbatim for every value tried (0-255), unlike mode |
 | 6 | colour/cycle flag (the vendor clears it when mode is 0) |
 | 7 | single-colour index; the vendor writes 0, the device reports 255 |
-| 8-10 | hue, saturation, value, each 0-255 |
+| 8-10 | hue, saturation, value, each 0-255. `value` 0 is dark and anything above it is full — it gates, it does not dim |
 
 Colour bytes come from `#RRGGBB` converted to HSV with hue in degrees and s/v
 as percentages, each then scaled by /360 or /100 into a byte. Because value is
@@ -294,7 +294,7 @@ saturated green leaves them plainly lit. So:
 
 | byte | effect |
 |---|---|
-| `value` (colour) | gates output — 0 is dark, 255 is full |
+| `value` (colour) | **on/off only** — 0 is dark, anything above 0 is full |
 | `brightness` | **none observed** |
 | `direction` | **none observed** |
 | `speed` | real: mode 3 fade, mode 4 rate |
@@ -305,8 +305,9 @@ colour part matters.
 Two of the four fields the light record carries are inert on this firmware, and
 both are exposed as primary controls in the vendor app. Whether this pad simply
 ignores them or drives output from HSV `value` alone is not established — the
-test that would separate them (a mid-range `value` such as 64, checking for
-visible dimming) is outstanding.
+That test was run: a mid-range value of 64 shows no visible dimming against 255,
+so `value` is a gate rather than a level. Nothing in the light record dims the
+output on this firmware.
 
 The tool's own `is_lit()` was wrong because of this: it computed
 `brightness > 0 && value > 0` and so reported "dark" for a lit green at
