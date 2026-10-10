@@ -237,7 +237,7 @@ names every mode and declares which parameters each one uses:
 | 0 | 关闭 off | – | – | – | – | off |
 | 1 | 常亮 steady | ✓ | – | – | ✓ | steady, all keys lit |
 | 2 | 呼吸 breathe | ✓ | ✓ | – | ✓ | slow pulse |
-| 3 | 按亮 press | ✓ | ✓ | – | ✓ | **lights on press, then fades** |
+| 3 | 按亮 press | ✓ | ✓ | – | ✓ | **lit while held, fades after release** |
 | 4 | 潮汐 tide | ✓ | ✓ | – | ✓ | colour fade, all keys together |
 | 5 | custom | ✓ | – | – | – | **per-key colours** |
 
@@ -287,58 +287,33 @@ could act, so the sweep could not have succeeded.
 `speed` is declared live for modes 2, 3 and 4, and confirmed on two of them. On
 mode 4 it behaves as expected: speed 1 is a slow fade, 255 much faster.
 
-**On mode 3 it does not.** What a press does, by speed:
+**On mode 3 it controls the fade after release.** The mode is lit **for as long
+as the key is held**, at every speed; only the fade that follows release varies.
 
-| speed | behaviour |
-|---|---|
-| 1 | fades over ~1s |
-| 2 | fades over ~1s |
-| 3 | fades in under 1s |
-| 4 | **no fade — lit only while the key is held** |
-| 5 | fades over ~7s |
-| 100 | fades over ~1.5s |
-| 255 | fades over ~1s, smooth |
+Measured by holding ~3s, then timing the fade after letting go:
 
-This is not a curve. There is a local minimum at 3, a **sharp discontinuity
-between 4 and 5**, and 255 behaving like 1. Higher speed does not mean faster
-fade, and speed 4 — which looks like the *fastest* setting — is the only one that
-does not fade at all.
-
-**The reason is that the supported range is 0-4.** The vendor's own light panel
-declares its speed slider `min: 0, max: 4` — identical to the brightness slider
-beside it. Everything above 4 is outside the range the product documents, and
-almost the entire sweep (5, 100, 255) was spent there.
-
-So the shape is not a curve with a peak. Within the supported range it behaves
-sensibly:
-
-| speed | behaviour | in range |
+| speed | while held | fade after release |
 |---|---|---|
-| 1 | fades ~1s | ✓ |
-| 2 | fades ~1s | ✓ |
-| 3 | fades <1s | ✓ |
-| 4 | no fade, lit only while held | ✓ |
-| 5 | fades ~7s | out of range |
-| 100 | fades ~1.5s | out of range |
-| 255 | fades ~1s | out of range |
+| 1 | lit | ~1s |
+| 2 | lit | ~1s |
+| 3 | lit | fast, under a second |
+| 4 | lit | immediate — too fast to see |
 
-Speed 4 being the fastest and 5 the slowest is the discontinuity, and it sits
-exactly at the boundary of the documented range. Whether the firmware does
-something deliberate past 4 or simply wraps is not established; the earlier
-"signed byte" idea for why 255 matched 1 remains a guess and is no longer
-needed to explain the data.
+Speed 4 does not "have no fade". It fades in less time than the eye resolves,
+which is why earlier readings described it as lit only while held.
 
-The practical guidance is unchanged and now better grounded: **stay in 0-4, and
-do not assume a higher speed fades faster** — within the supported range that is
-true, and the fastest setting (4) does not fade at all.
+A press during the fade **restarts** it, so speed is effectively a release
+timeout rather than a fade rate: press again before it expires and the pad stays
+lit.
 
-Measurements are single presses with brightness, colour, mode and direction
-pinned; the ~7s at speed 5 was reproduced twice hours apart. Treat the shape as
-established and the exact values as approximate.
+Values above 4 are outside the documented range and behave erratically — speed 5
+fades over ~7s, slower than any supported value. Do not use them.
 
-So: **do not script lighting changes on the assumption that a higher speed fades
-faster.** That assumption is wrong, and wrong in a way that is invisible until
-someone sets a high speed and gets a short fade they did not ask for.
+An earlier version of this section reported a local minimum at 3 and a peak at 2.
+That was an artefact of comparing readings taken with other parameters drifting
+between them; a clean hold-and-release sequence at each speed shows a monotonic
+decrease. Single presses are not a reliable instrument here, and neither are
+samples taken minutes apart.
 
 Modes 5 and 6 can leave some keys dark, so "brightness 3" in a read-back does
 not mean every key is lit. The record describes the global configuration, not
