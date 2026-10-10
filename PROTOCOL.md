@@ -287,24 +287,34 @@ could act, so the sweep could not have succeeded.
 `speed` is declared live for modes 2, 3 and 4, and confirmed on two of them. On
 mode 4 it behaves as expected: speed 1 is a slow fade, 255 much faster.
 
-**On mode 3 it does not.** Fade duration after a press:
+**On mode 3 it does not.** What a press does, by speed:
 
-| speed | duration | smoothness |
-|---|---|---|
-| 1 | ~1s | smooth |
-| 5 | **~7s** | — |
-| 100 | ~1.5s | — |
-| 255 | ~1s | smooth |
+| speed | behaviour |
+|---|---|
+| 1 | fades over ~1s |
+| 2 | fades over ~1s |
+| 3 | fades in under 1s |
+| 4 | **no fade — lit only while the key is held** |
+| 5 | fades over ~7s |
+| 100 | fades over ~1.5s |
+| 255 | fades over ~1s, smooth |
 
-Duration **peaks at a low speed** and shortens toward both extremes. Higher speed
-does not mean faster fade, and 0 and 255 behave alike — 255 behaves exactly like
-1, which is consistent with the firmware treating the byte as *signed* so that
-255 is -1, but that reading is not confirmed.
+This is not a curve. There is a local minimum at 3, a **sharp discontinuity
+between 4 and 5**, and 255 behaving like 1. Higher speed does not mean faster
+fade, and speed 4 — which looks like the *fastest* setting — is the only one that
+does not fade at all.
 
-The ~7s peak at speed 5 was measured twice, roughly an hour apart, with all
-other parameters pinned. The 1s figures come from single presses and are less
-firmly established; treat them as approximate. The curve's shape is established,
-its exact values are not.
+Two candidate mechanisms, **neither confirmed**:
+
+- **Discrete values, not a scale.** The 4-to-5 jump is abrupt enough that 4 and
+  5 may select different behaviour rather than different rates.
+- **Signed byte.** 255 behaving identically to 1 is what a firmware reading the
+  byte as signed would produce, since 255 is -1. That would explain the match but
+  not the 4-to-5 cliff.
+
+Measurements are single presses with brightness, colour, mode and direction
+pinned; the ~7s at speed 5 was reproduced twice hours apart. Treat the shape as
+established and the exact values as approximate.
 
 So: **do not script lighting changes on the assumption that a higher speed fades
 faster.** That assumption is wrong, and wrong in a way that is invisible until
