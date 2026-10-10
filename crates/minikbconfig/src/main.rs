@@ -606,6 +606,17 @@ fn cmd_snapshot(args: &[String], layer: u8) -> anyhow::Result<()> {
         .copied()
         .context("usage: minikbconfig snapshot <FILE>")?;
 
+    // --dry-run belongs to `apply`. Honouring it here would mean writing the
+    // snapshot anyway, which is the worst reading of "dry": the user asked for
+    // no side effect and the file they were protecting gets overwritten.
+    if args.iter().any(|a| a == "--dry-run" || a == "-n") {
+        anyhow::bail!(
+            "--dry-run applies to `apply`, not `snapshot`. \
+             A snapshot's only effect is writing the file, so there is nothing to dry-run about; \
+             omit the flag to write {path}."
+        );
+    }
+
     let pad = Pad::open()?;
     let table = pad.read_keys(layer)?;
 
@@ -857,6 +868,14 @@ mod flag_tests {
         // allowlist admitting it are two separate lists.
         assert!(check_flags(&["--verify".into()]).is_ok());
         assert!(check_flags(&["-V".into()]).is_ok());
+    }
+
+    #[test]
+    fn snapshot_refuses_dry_run_rather_than_writing_anyway() {
+        // Found the hard way: `snapshot <file> --dry-run` was run against a
+        // committed snapshot during development and overwrote it, because the
+        // flag was accepted by check_flags and then ignored here.
+        assert!(cmd_snapshot(&["pad.json".into(), "--dry-run".into()], 0).is_err());
     }
 
     #[test]

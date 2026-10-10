@@ -9,11 +9,11 @@
   "keys": [
     {
       "index": 0,
-      "action": "key:space",
+      "action": "key:gui-c",
       "raw": [
         32,
-        0,
-        44,
+        8,
+        6,
         0
       ]
     },
@@ -29,11 +29,11 @@
     },
     {
       "index": 2,
-      "action": "key:f19",
+      "action": "key:f18",
       "raw": [
         32,
         0,
-        110,
+        109,
         0
       ]
     },
@@ -59,11 +59,11 @@
     },
     {
       "index": 5,
-      "action": "key:f13",
+      "action": "key:enter",
       "raw": [
         32,
         0,
-        104,
+        40,
         0
       ]
     },
