@@ -100,7 +100,7 @@ fn run() -> anyhow::Result<()> {
 
     let command = args[0].clone();
     let rest = &args[1..];
-    check_flags(rest)?;
+    check_flags(&command, rest)?;
     let layer = parse_layer_flag(rest)?;
 
     match command.as_str() {
@@ -129,36 +129,76 @@ fn run() -> anyhow::Result<()> {
 /// Checked up front because a mistyped flag is otherwise swallowed silently:
 /// `watch --raw15` is not `--raw 15`, and it was quietly treated as no flag at
 /// all, giving non-raw output for the wrong duration with nothing to say so.
-const FLAGS: &[&str] = &[
-    "-h",
-    "--help",
-    "-V",
-    "--version",
-    "-l",
-    "--layer",
-    "--dry-run",
-    "-n",
-    "--yes",
-    "-y",
-    "--raw",
-    "-R",
-    "--verify",
-    "-V",
-    // `led on` options. Same failure as --verify: parsed in cmd_led, listed in
-    // the help text, and never admitted here, so every one of them was refused.
-    "--brightness",
-    "-b",
-    "--mode",
-    "-m",
-    "--color",
-    "--colour",
-    "-c",
-    "--speed",
-    "--direction",
+/// Flags accepted by every command.
+const GLOBAL_FLAGS: &[&str] = &["-h", "--help", "-V", "--version"];
+
+/// The layer flag, which every command reads through [`parse_layer_flag`].
+const LAYER_FLAGS: &[&str] = &["-l", "--layer"];
+
+/// Flags each command actually reads.
+///
+/// This replaces a single flat allowlist, which is how `--verify` and every
+/// `led on` option came to be implemented, documented, and rejected by
+/// [`check_flags`] at the same time. A flat list says nothing about *where* a
+/// flag is honoured, so it cannot catch the inverse error: a flag accepted on a
+/// command that ignores it. `apply --verify` was silently doing nothing for
+/// exactly that reason.
+///
+/// Listing them per command means an unused flag is a build failure rather than
+/// a surprise at runtime. `check_flags` reads this table, so a flag has to be
+/// added in one place to be accepted and one place to be read.
+const COMMAND_FLAGS: &[(&str, &[&str])] = &[
+    ("info", &[]),
+    ("dump", &[]),
+    ("keys", &[]),
+    ("keys-list", &[]),
+    ("set", &["--verify", "-V"]),
+    (
+        "led",
+        &[
+            "--brightness",
+            "-b",
+            "--mode",
+            "-m",
+            "--color",
+            "--colour",
+            "-c",
+            "--speed",
+            "--direction",
+        ],
+    ),
+    ("snapshot", &[]),
+    ("apply", &["--dry-run", "-n", "--yes", "-y"]),
+    ("profile", &[]),
+    ("watch", &["--raw", "-R"]),
+    ("completions", &[]),
 ];
 
+/// Every flag the tool knows, for the help-text consistency checks.
+#[cfg(test)]
+fn all_flags() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = GLOBAL_FLAGS.to_vec();
+    out.extend_from_slice(LAYER_FLAGS);
+    for (_, flags) in COMMAND_FLAGS {
+        out.extend_from_slice(flags);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// Reject any flag we do not recognise, rather than ignoring it.
-fn check_flags(args: &[String]) -> anyhow::Result<()> {
+/// Reject a flag this command does not read.
+///
+/// `command` is the subcommand, so `apply --verify` is refused rather than
+/// silently ignored — the failure mode a flat allowlist cannot detect.
+fn check_flags(command: &str, args: &[String]) -> anyhow::Result<()> {
+    let command_flags = COMMAND_FLAGS
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, flags)| *flags)
+        .unwrap_or(&[]);
+
     for arg in args {
         if !arg.starts_with('-') || arg == "-" {
             continue;
@@ -166,8 +206,23 @@ fn check_flags(args: &[String]) -> anyhow::Result<()> {
         // Allow --flag=value, and a negative-looking value such as a duration
         // is not a flag we accept either.
         let name = arg.split('=').next().unwrap_or(arg);
-        if !FLAGS.contains(&name) {
-            anyhow::bail!("unknown option '{arg}'; try --help");
+        if GLOBAL_FLAGS.contains(&name) || LAYER_FLAGS.contains(&name) {
+            continue;
+        }
+        if command_flags.contains(&name) {
+            continue;
+        }
+        // Name a command that would have accepted it, when there is one. This is
+        // the difference between "unknown option" and "--verify is a `set` flag".
+        let owner = COMMAND_FLAGS
+            .iter()
+            .find(|(_, flags)| flags.contains(&name))
+            .map(|(name, _)| *name);
+        match owner {
+            Some(other) => anyhow::bail!(
+                "{name} is a `{other}` option, not a `{command}` one; try `minikbconfig {other} {name}`"
+            ),
+            None => anyhow::bail!("unknown option '{arg}'; try --help"),
         }
     }
     Ok(())
@@ -859,33 +914,55 @@ fn cmd_watch(args: &[String]) -> anyhow::Result<()> {
 mod flag_tests {
     use super::*;
 
+    fn flags(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
     #[test]
     fn a_mistyped_flag_is_rejected_rather_than_ignored() {
         // Found by using it: `watch --raw15` is not `--raw 15`, and it used to
         // be swallowed, silently giving non-raw output for the wrong duration.
-        assert!(check_flags(&["--raw".into(), "15".into()]).is_ok());
-        assert!(check_flags(&["--raw15".into()]).is_err());
-        assert!(check_flags(&["--dry-run".into()]).is_ok());
-        assert!(check_flags(&["-y".into()]).is_ok());
-        assert!(check_flags(&["--layer=2".into()]).is_ok());
+        assert!(check_flags("watch", &flags(&["--raw", "15"])).is_ok());
+        assert!(check_flags("watch", &flags(&["--raw15"])).is_err());
+        assert!(check_flags("apply", &flags(&["--dry-run"])).is_ok());
+        assert!(check_flags("apply", &flags(&["-y"])).is_ok());
+        assert!(check_flags("dump", &flags(&["--layer=2"])).is_ok());
         // Positional arguments are not flags, and neither is a lone dash.
-        assert!(check_flags(&["pad.json".into(), "0".into()]).is_ok());
-        assert!(check_flags(&["-".into()]).is_ok());
-        assert!(check_flags(&["--nope".into()]).is_err());
-        // --verify is the flag this test exists for. It was implemented,
-        // documented and tested in isolation, and rejected by check_flags on
-        // every use, because the implementation reading a flag and the
-        // allowlist admitting it are two separate lists.
-        assert!(check_flags(&["--verify".into()]).is_ok());
-        assert!(check_flags(&["-V".into()]).is_ok());
+        assert!(check_flags("apply", &flags(&["pad.json", "0"])).is_ok());
+        assert!(check_flags("apply", &flags(&["-"])).is_ok());
+        assert!(check_flags("dump", &flags(&["--nope"])).is_err());
     }
 
     #[test]
-    fn snapshot_refuses_dry_run_rather_than_writing_anyway() {
-        // Found the hard way: `snapshot <file> --dry-run` was run against a
-        // committed snapshot during development and overwrote it, because the
-        // flag was accepted by check_flags and then ignored here.
-        assert!(cmd_snapshot(&["pad.json".into(), "--dry-run".into()], 0).is_err());
+    fn a_flag_is_refused_by_a_command_that_ignores_it() {
+        // The failure a flat allowlist cannot catch: `apply --verify` was
+        // accepted and silently did nothing.
+        let err = check_flags("apply", &flags(&["--verify"]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--verify"), "{err}");
+        assert!(
+            err.contains("set"),
+            "should name the command that takes it: {err}"
+        );
+
+        assert!(check_flags("snapshot", &flags(&["--raw"])).is_err());
+        assert!(check_flags("info", &flags(&["--brightness", "2"])).is_err());
+        assert!(check_flags("watch", &flags(&["--yes"])).is_err());
+        assert!(check_flags("set", &flags(&["--verify"])).is_ok());
+        assert!(check_flags("watch", &flags(&["--raw"])).is_ok());
+    }
+
+    #[test]
+    fn global_and_layer_flags_are_accepted_everywhere() {
+        for (command, _) in COMMAND_FLAGS {
+            for flag in GLOBAL_FLAGS.iter().chain(LAYER_FLAGS) {
+                assert!(
+                    check_flags(command, &flags(&[flag])).is_ok(),
+                    "{flag} should work with `{command}`"
+                );
+            }
+        }
     }
 
     #[test]
@@ -903,7 +980,7 @@ mod flag_tests {
                 }
                 let name = token.trim_end_matches(',');
                 assert!(
-                    FLAGS.contains(&name),
+                    all_flags().contains(&name),
                     "help documents {name} but check_flags would reject it"
                 );
             }
@@ -913,7 +990,7 @@ mod flag_tests {
     #[test]
     fn every_flag_check_accepts_is_documented() {
         // The other direction: an allowlisted flag nobody can discover.
-        for flag in FLAGS {
+        for flag in all_flags() {
             if USAGE.contains(flag) {
                 continue;
             }
