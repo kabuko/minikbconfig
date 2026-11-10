@@ -18,7 +18,7 @@ only in key count.
 ## Install
 
 ```sh
-git clone <this repo> && cd minikbconfig
+git clone https://github.com/kabuko/minikbconfig && cd minikbconfig
 ./scripts/install.sh
 ```
 

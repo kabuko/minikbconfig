@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/yourname/minikbconfig"
+repository = "https://github.com/kabuko/minikbconfig"
 
 [workspace.dependencies]
 minikbconfig-config = { path = "crates/minikbconfig-config", version = "0.1.0" }
