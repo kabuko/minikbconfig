@@ -287,3 +287,7 @@ findings that changed the implementation.
 [DESIGN.md](DESIGN.md) covers why it is built this way.
 [PROTOCOL.md](PROTOCOL.md) is the reverse-engineered reference, with hardware
 measurements and the traps that cost real time.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
